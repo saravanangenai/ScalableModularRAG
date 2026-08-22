@@ -1,0 +1,207 @@
+# Data Model — Multi-Tenant, Versioned, Permissioned
+
+- **Status:** approved baseline
+- **Stores:** PostgreSQL (system of record) + Qdrant (vector/payload projection)
+
+## 1. Why two stores
+
+PostgreSQL owns identity, ownership, membership, permissions, job state, conversations, and
+audit — anything relational that needs joins, transactions, or exact-match integrity. Qdrant
+owns vectors and a **denormalized copy** of the subset of metadata needed to filter search
+results (`tenant_id`, `workspace_id`, `document_id`, `document_version_id`, `content_type`,
+`visibility`). Qdrant is never the source of truth for who-can-see-what — it just needs to be
+fast to filter on. If Postgres and Qdrant ever disagree, Postgres wins and Qdrant is
+re-synced (this is what the versioning/incremental-ingestion job in `03-ingestion-workflow.md`
+does).
+
+## 2. PostgreSQL schema (entities)
+
+```
+tenants
+  id (uuid, pk)
+  name
+  slug (unique)
+  plan_tier                 -- free/pro/enterprise, drives usage_quotas
+  created_at
+
+users
+  id (uuid, pk)
+  email (unique)
+  display_name
+  auth_provider_subject     -- sub claim from IdP (Auth0/Keycloak/etc.)
+  created_at
+
+tenant_members
+  tenant_id (fk tenants)
+  user_id (fk users)
+  role                      -- 'owner' | 'admin' | 'member'
+  PRIMARY KEY (tenant_id, user_id)
+
+workspaces
+  id (uuid, pk)
+  tenant_id (fk tenants)
+  name
+  created_by (fk users)
+  created_at
+
+workspace_members
+  workspace_id (fk workspaces)
+  user_id (fk users)
+  role                      -- 'owner' | 'editor' | 'viewer'
+  PRIMARY KEY (workspace_id, user_id)
+
+documents
+  id (uuid, pk)
+  workspace_id (fk workspaces)
+  filename
+  content_hash_current      -- sha256 of the latest uploaded bytes
+  status                    -- see 03-ingestion-workflow.md state machine
+  current_version_id (fk document_versions, nullable until first version is ready)
+  created_by (fk users)
+  created_at
+  updated_at
+
+document_versions
+  id (uuid, pk)
+  document_id (fk documents)
+  version_number             -- monotonic per document, starts at 1
+  content_hash                -- sha256 of the bytes this version was built from
+  object_storage_key          -- where the raw PDF lives
+  page_count
+  is_current (bool)
+  superseded_at (nullable)
+  created_at
+
+ingestion_jobs
+  id (uuid, pk)
+  document_id (fk documents)
+  document_version_id (fk document_versions)
+  status                     -- queued|parsing|chunking|embedding|indexing|ready|failed
+  failure_stage (nullable)
+  failure_reason (nullable)
+  retry_count (int, default 0)
+  started_at / finished_at
+  created_at
+
+conversations
+  id (uuid, pk)
+  workspace_id (fk workspaces)
+  created_by (fk users)
+  title
+  is_shared (bool)
+  share_token (nullable, unique)
+  created_at
+
+messages
+  id (uuid, pk)
+  conversation_id (fk conversations)
+  role                        -- 'user' | 'assistant'
+  content
+  sources_json                -- citation list returned with this message
+  used_images_json
+  model_name
+  usage_json                  -- tokens/cost, see 07-evaluation-observability.md
+  latency_ms
+  created_at
+
+message_feedback
+  id (uuid, pk)
+  message_id (fk messages)
+  user_id (fk users)
+  rating                      -- 'up' | 'down'
+  comment (nullable)
+  created_at
+
+api_keys
+  id (uuid, pk)
+  tenant_id (fk tenants)
+  key_hash                    -- never store raw key
+  scopes                      -- e.g. ['documents:read','chat:write']
+  created_by (fk users)
+  revoked_at (nullable)
+  created_at
+
+audit_log
+  id (uuid, pk)
+  tenant_id (fk tenants)
+  actor_user_id (fk users, nullable for system actions)
+  action                       -- 'document.upload' | 'document.delete' | 'chat.query' | ...
+  resource_type / resource_id
+  metadata_json
+  created_at
+
+usage_quotas
+  tenant_id (fk tenants, pk)
+  period_start / period_end
+  documents_ingested_count
+  storage_bytes_used
+  queries_count
+  tokens_used
+  quota_documents / quota_storage_bytes / quota_queries / quota_tokens
+```
+
+Indexes: `documents(workspace_id)`, `document_versions(document_id, version_number)`,
+`ingestion_jobs(status)` (worker polling / dashboards), `workspace_members(user_id)` (fast
+"which workspaces can this user see" lookup used to build the retrieval filter),
+`audit_log(tenant_id, created_at)`.
+
+Row-level isolation: every tenant-scoped table carries `tenant_id` (directly or via
+`workspace_id -> workspaces.tenant_id`), and Postgres Row-Level Security policies key off
+`current_setting('app.current_tenant_id')`, set per-request by the API layer as
+defense-in-depth behind the application-level filtering described in `06-security-model.md`.
+
+## 3. Qdrant payload schema
+
+One collection per embedding-dimension/model family (e.g. `mm_rag_v1`), **not** one
+collection per tenant — payload-based partitioning as the assignment requires (3.4). Every
+point (chunk) payload:
+
+```json
+{
+  "tenant_id": "uuid",
+  "workspace_id": "uuid",
+  "document_id": "uuid",
+  "document_version_id": "uuid",
+  "is_current_version": true,
+  "content_type": "page_text_plus_ocr | table | image",
+  "page_number": 12,
+  "chunk_index": 3,
+  "table_index": null,
+  "image_index": null,
+  "image_path": "s3://.../page_012_image_1.png",
+  "filename": "Client_Contracts.pdf",
+  "visibility": "workspace",
+  "created_at": "2026-08-17T..."
+}
+```
+
+This is a direct extension of the existing metadata already produced by
+`src/ingestion.py::prepare_documents` (`document_id`, `filename`, `content_type`,
+`page_number`, `chunk_index`, `table_index`, `image_index`, `image_path`) — we are adding
+`tenant_id`, `workspace_id`, `document_version_id`, `is_current_version`, and `visibility`.
+
+Required payload indexes (extending the existing `_ensure_collection` index set in
+`src/ingestion.py`): `tenant_id`, `workspace_id`, `document_id`, `document_version_id`,
+`is_current_version`, `content_type`, `page_number` (already present today as
+`metadata.document_id`, `metadata.filename`, `metadata.file_sha256`, `metadata.content_type`,
+`metadata.page_number` — note the field path changes from `metadata.*` to top-level once
+points are written by the new ingestion service; the migration plan for existing data lives
+in the spec that implements this phase, not here).
+
+## 4. Entity relationship summary
+
+```
+tenants 1---N workspaces 1---N documents 1---N document_versions 1---N ingestion_jobs
+tenants 1---N tenant_members N---1 users
+workspaces 1---N workspace_members N---1 users
+workspaces 1---N conversations 1---N messages 1---N message_feedback
+document_versions --(fan-out at ingest time)--> Qdrant points (tenant_id/workspace_id/
+  document_id/document_version_id in payload)
+```
+
+## 5. Related docs
+
+- `03-ingestion-workflow.md` — how `documents` / `document_versions` / `ingestion_jobs` rows
+  move through states
+- `06-security-model.md` — how `workspace_members` role drives the mandatory retrieval filter
+- `09-repo-and-module-structure.md` — where SQLAlchemy models / Alembic migrations live
