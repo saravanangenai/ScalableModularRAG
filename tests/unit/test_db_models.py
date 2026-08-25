@@ -36,3 +36,8 @@ def test_document_versions_unique_per_document_and_version_number():
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
     assert ("document_id", "version_number") in unique_constraints
+
+
+def test_users_auth_provider_subject_is_unique():
+    table = Base.metadata.tables["users"]
+    assert table.columns["auth_provider_subject"].unique

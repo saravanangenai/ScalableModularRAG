@@ -1,6 +1,6 @@
 # Local dev dependency stack for the MM-RAG platform.
 #
-# Scope: only the stateful backing services (Postgres, Redis, Qdrant, MinIO).
+# Scope: only the stateful backing services (Postgres, Redis, Qdrant, MinIO, Keycloak).
 # `api`, `worker`, `UI`, and `streamlit-admin` services are added here once their
 # respective phases (specs/architecture/08-roadmap.md) land real app code — there is
 # nothing to build a Dockerfile from yet for those.
@@ -80,6 +80,25 @@ services:
     networks:
       - mm-rag-net
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.2
+    restart: unless-stopped
+    command: ["start-dev"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mm-rag-net
+
 networks:
   mm-rag-net:
     driver: bridge
@@ -89,3 +108,4 @@ volumes:
   redis_data:
   qdrant_data:
   minio_data:
+  keycloak_data:

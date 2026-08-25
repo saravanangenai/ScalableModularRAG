@@ -13,9 +13,11 @@ query without that filter searches the entire collection.
 
 ## 2. Authentication
 
-- Identity provider: an external IdP issuing JWTs — Keycloak (self-hosted, enterprise
-  control) or Auth0/Clerk (managed, faster to stand up). Pick one per the deployment target;
-  either way the API never handles raw passwords.
+- Identity provider: **Keycloak, self-hosted** (decided in
+  `specs/011-auth-and-workspaces/plan.md`, over managed alternatives like Auth0/Clerk) — full
+  local-dev control, no external account/cost, and works fully offline, consistent with this
+  project's Docker-free local-dev direction. The API never handles raw passwords; Keycloak
+  issues JWTs via its own token endpoint.
 - `apps/api` verifies JWTs on every request (signature, expiry, issuer/audience) via a
   standard middleware; it does not mint its own session tokens.
 - JWT claims carry `sub` (maps to `users.auth_provider_subject`), `tenant_id` is **not**

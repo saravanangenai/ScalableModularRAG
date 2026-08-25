@@ -28,7 +28,8 @@ users
   id (uuid, pk)
   email (unique)
   display_name
-  auth_provider_subject     -- sub claim from IdP (Auth0/Keycloak/etc.)
+  auth_provider_subject     -- unique; sub claim from IdP (Keycloak, self-hosted per
+                             -- 06-security-model.md §2 / 011-auth-and-workspaces)
   created_at
 
 tenant_members
@@ -47,6 +48,7 @@ workspaces
 workspace_members
   workspace_id (fk workspaces)
   user_id (fk users)
+  tenant_id (fk tenants)     -- denormalized from workspaces.tenant_id, see note below
   role                      -- 'owner' | 'editor' | 'viewer'
   PRIMARY KEY (workspace_id, user_id)
 
@@ -160,6 +162,16 @@ policy a single indexed equality check instead of a multi-level subquery on ever
 The column is populated at insert time from the parent's `tenant_id` and is never
 independently settable — any future mutation that re-parents a row (e.g. moving a document to
 a different workspace) must update both columns in the same transaction.
+
+`workspace_members` also carries a denormalized `tenant_id`, added later by
+`specs/011-auth-and-workspaces/plan.md` for a different reason than the tables above: it's not
+about avoiding a join at query time, it's about **bootstrap ordering**. `workspace_members`
+(like `tenant_members`) deliberately carries no Row-Level Security, so it can be queried to
+resolve a caller's role *before* `app.current_tenant_id` is known. Without `tenant_id` sitting
+right there, resolving which tenant a `workspace_id` belongs to would require querying
+`workspaces` — which *is* RLS-protected, and would return nothing before the GUC is set.
+Carrying `tenant_id` on `workspace_members` lets one pre-GUC query answer both "does this
+caller have workspace access" and "which tenant do I scope the GUC to."
 
 Row-level isolation: every tenant-scoped table carries `tenant_id` (directly or via
 `workspace_id -> workspaces.tenant_id`), and Postgres Row-Level Security policies key off

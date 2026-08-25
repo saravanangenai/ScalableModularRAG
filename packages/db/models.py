@@ -36,7 +36,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(unique=True)
     display_name: Mapped[str]
-    auth_provider_subject: Mapped[str]
+    auth_provider_subject: Mapped[str] = mapped_column(unique=True)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
 
@@ -77,6 +77,13 @@ class WorkspaceMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
         index=True,
+    )
+    # Denormalized from workspaces.tenant_id — see 011-auth-and-workspaces/plan.md. Lets a
+    # request resolve "does this caller have workspace access, and which tenant does this
+    # workspace belong to" in one query against a table that (like tenant_members) carries
+    # no RLS, before app.current_tenant_id is known/set.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
     role: Mapped[str] = mapped_column(
         CheckConstraint(

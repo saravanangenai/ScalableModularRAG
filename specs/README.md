@@ -32,12 +32,12 @@ first — everything else builds on it.
 
 ## Per-increment specs
 
-None yet. The first three to write, per `08-roadmap.md`, are:
+The first three per `08-roadmap.md`:
 
 | ID | Title | Status |
 |---|---|---|
 | `010-metadata-db-and-object-storage` | Postgres schema + migrations, S3/MinIO wiring | done |
-| `011-auth-and-workspaces` | IdP integration, tenant/workspace membership, API auth middleware | not started |
+| `011-auth-and-workspaces` | IdP integration, tenant/workspace membership, API auth middleware | done |
 | `020-async-ingestion-pipeline` | Celery/Redis job queue, parser workers, status endpoints | not started |
 
 Add a row here every time a new `specs/<NNN-slug>/` folder is created (`.claude/skills/spec/SKILL.md`
