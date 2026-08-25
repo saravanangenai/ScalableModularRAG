@@ -36,7 +36,7 @@ None yet. The first three to write, per `08-roadmap.md`, are:
 
 | ID | Title | Status |
 |---|---|---|
-| `010-metadata-db-and-object-storage` | Postgres schema + migrations, S3/MinIO wiring | not started |
+| `010-metadata-db-and-object-storage` | Postgres schema + migrations, S3/MinIO wiring | done |
 | `011-auth-and-workspaces` | IdP integration, tenant/workspace membership, API auth middleware | not started |
 | `020-async-ingestion-pipeline` | Celery/Redis job queue, parser workers, status endpoints | not started |
 

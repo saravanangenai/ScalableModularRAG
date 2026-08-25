@@ -53,6 +53,7 @@ workspace_members
 documents
   id (uuid, pk)
   workspace_id (fk workspaces)
+  tenant_id (fk tenants)     -- denormalized from workspaces.tenant_id, see note below
   filename
   content_hash_current      -- sha256 of the latest uploaded bytes
   status                    -- see 03-ingestion-workflow.md state machine
@@ -64,6 +65,7 @@ documents
 document_versions
   id (uuid, pk)
   document_id (fk documents)
+  tenant_id (fk tenants)     -- denormalized from documents.tenant_id, see note below
   version_number             -- monotonic per document, starts at 1
   content_hash                -- sha256 of the bytes this version was built from
   object_storage_key          -- where the raw PDF lives
@@ -76,6 +78,7 @@ ingestion_jobs
   id (uuid, pk)
   document_id (fk documents)
   document_version_id (fk document_versions)
+  tenant_id (fk tenants)     -- denormalized from documents.tenant_id, see note below
   status                     -- queued|parsing|chunking|embedding|indexing|ready|failed
   failure_stage (nullable)
   failure_reason (nullable)
@@ -86,6 +89,7 @@ ingestion_jobs
 conversations
   id (uuid, pk)
   workspace_id (fk workspaces)
+  tenant_id (fk tenants)     -- denormalized from workspaces.tenant_id, see note below
   created_by (fk users)
   title
   is_shared (bool)
@@ -95,6 +99,7 @@ conversations
 messages
   id (uuid, pk)
   conversation_id (fk conversations)
+  tenant_id (fk tenants)     -- denormalized from conversations.tenant_id, see note below
   role                        -- 'user' | 'assistant'
   content
   sources_json                -- citation list returned with this message
@@ -107,6 +112,7 @@ messages
 message_feedback
   id (uuid, pk)
   message_id (fk messages)
+  tenant_id (fk tenants)     -- denormalized from messages.tenant_id, see note below
   user_id (fk users)
   rating                      -- 'up' | 'down'
   comment (nullable)
@@ -143,7 +149,17 @@ usage_quotas
 Indexes: `documents(workspace_id)`, `document_versions(document_id, version_number)`,
 `ingestion_jobs(status)` (worker polling / dashboards), `workspace_members(user_id)` (fast
 "which workspaces can this user see" lookup used to build the retrieval filter),
-`audit_log(tenant_id, created_at)`.
+`audit_log(tenant_id, created_at)`. Every denormalized `tenant_id` column below is also
+indexed.
+
+Denormalized `tenant_id`: `documents`, `document_versions`, `ingestion_jobs`, `conversations`,
+`messages`, and `message_feedback` carry a direct `tenant_id` column in addition to reaching
+it transitively via `workspace_id`/`document_id`/`conversation_id` joins (per
+`specs/010-metadata-db-and-object-storage/plan.md`). This keeps every Row-Level Security
+policy a single indexed equality check instead of a multi-level subquery on every row access.
+The column is populated at insert time from the parent's `tenant_id` and is never
+independently settable — any future mutation that re-parents a row (e.g. moving a document to
+a different workspace) must update both columns in the same transaction.
 
 Row-level isolation: every tenant-scoped table carries `tenant_id` (directly or via
 `workspace_id -> workspaces.tenant_id`), and Postgres Row-Level Security policies key off

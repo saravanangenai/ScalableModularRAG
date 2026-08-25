@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+!*/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv
+.uv/
+
+# Node (apps/UI)
+node_modules/
+dist/
+.vite/
+
+# Docker
+infra/*_data/
+
+# Eval outputs (per specs/architecture/07-evaluation-observability.md)
+eval/reports/*
+!eval/reports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
