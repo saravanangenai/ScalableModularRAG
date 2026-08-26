@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from apps.api.routers import auth as auth_router
-from apps.api.routers import tenants, workspaces
+from apps.api.routers import documents, jobs, tenants, workspaces
 from packages.db.session import get_async_sessionmaker
 from packages.exceptions import AuthenticationError, AuthorizationError, MembershipNotFoundError
 
@@ -37,6 +37,8 @@ def create_app() -> FastAPI:
     app.include_router(tenants.router)
     app.include_router(workspaces.router)
     app.include_router(auth_router.router)
+    app.include_router(documents.router)
+    app.include_router(jobs.router)
 
     return app
 

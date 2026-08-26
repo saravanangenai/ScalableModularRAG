@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from packages.db.models import TenantMember, User, WorkspaceMember
 
@@ -59,10 +60,27 @@ async def resolve_workspace_role(
     return (row.role, row.tenant_id) if row is not None else None
 
 
-async def set_tenant_scope(session: AsyncSession, tenant_id: uuid.UUID) -> None:
-    """Sets app.current_tenant_id for the remainder of this session's transaction, engaging
-    the Row-Level Security policies from 010-metadata-db-and-object-storage."""
+async def set_tenant_scope(session: AsyncSession, tenant_id: uuid.UUID, local: bool = True) -> None:
+    """Sets app.current_tenant_id, engaging the Row-Level Security policies from
+    010-metadata-db-and-object-storage. local=True (default) scopes it to the current
+    transaction only (resets on commit/rollback) — required for apps/api, whose sessions sit
+    in a pool and get reused across unrelated requests/tenants. Pass local=False only for a
+    session dedicated to one tenant for its whole lifetime (see set_tenant_scope_sync)."""
     await session.execute(
-        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
-        {"tenant_id": str(tenant_id)},
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, :local)"),
+        {"tenant_id": str(tenant_id), "local": local},
+    )
+
+
+def set_tenant_scope_sync(session: Session, tenant_id: uuid.UUID, local: bool = True) -> None:
+    """Sync counterpart of set_tenant_scope, for callers using packages.db's sync session
+    factory — added in 020-async-ingestion-pipeline for workers/celery_app.py, which runs
+    sync (Celery tasks are sync by default, per 010's "Session/engine strategy"). The worker
+    calls this with local=False: its session is dedicated to one job/tenant for its whole
+    lifetime (never pooled across tenants), and the ingestion pipeline commits multiple times
+    as ingestion_jobs.status advances through each stage — a transaction-local GUC would
+    reset on every one of those commits, re-triggering the bootstrap problem mid-job."""
+    session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, :local)"),
+        {"tenant_id": str(tenant_id), "local": local},
     )

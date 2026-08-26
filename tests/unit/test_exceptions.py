@@ -5,8 +5,10 @@ from packages.exceptions import (
     AuthorizationError,
     DatabaseError,
     DocumentPortalException,
+    IngestionError,
     MembershipNotFoundError,
     ObjectStorageError,
+    ParsingError,
 )
 
 
@@ -57,4 +59,18 @@ def test_membership_not_found_error_is_document_portal_exception():
     exc = MembershipNotFoundError("not a member")
     assert isinstance(exc, DocumentPortalException)
     with pytest.raises(MembershipNotFoundError):
+        raise exc
+
+
+def test_parsing_error_is_document_portal_exception():
+    exc = ParsingError("could not parse PDF")
+    assert isinstance(exc, DocumentPortalException)
+    with pytest.raises(ParsingError):
+        raise exc
+
+
+def test_ingestion_error_is_document_portal_exception():
+    exc = IngestionError("could not upsert into Qdrant")
+    assert isinstance(exc, DocumentPortalException)
+    with pytest.raises(IngestionError):
         raise exc

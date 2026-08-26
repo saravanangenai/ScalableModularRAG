@@ -107,8 +107,8 @@ corresponding spec is written and approved.
 
 | Router | Endpoints (indicative) | Auth |
 |---|---|---|
-| `documents` | `POST /workspaces/{id}/documents` (upload), `GET /workspaces/{id}/documents`, `GET /documents/{id}`, `GET /documents/{id}/versions`, `DELETE /documents/{id}` | workspace editor+ for write, viewer+ for read |
-| `jobs` | `GET /jobs/{id}`, `GET /jobs/{id}/events` (SSE) | same workspace as the job's document |
+| `documents` | `POST /workspaces/{id}/documents` (upload), `GET /workspaces/{id}/documents`, `GET /workspaces/{id}/documents/{document_id}`, `GET /workspaces/{id}/documents/{document_id}/versions`, `DELETE /workspaces/{id}/documents/{document_id}` | workspace editor+ for write, viewer+ for read |
+| `jobs` | `GET /workspaces/{id}/jobs/{job_id}`, `GET /workspaces/{id}/jobs/{job_id}/events` (SSE) | same workspace as the job's document — **note:** all document/job routes are nested under `/workspaces/{id}/...` (changed from an earlier bare `/documents/{id}`/`/jobs/{id}` shape by `020-async-ingestion-pipeline/plan.md`) because `documents`/`ingestion_jobs` are RLS-protected — resolving a bare id to its workspace/tenant would require querying the very table RLS is blocking before the GUC is set |
 | `chat` | `POST /workspaces/{id}/conversations`, `POST /conversations/{id}/messages` (ask), `GET /conversations/{id}` | workspace viewer+ |
 | `feedback` | `POST /messages/{id}/feedback` | workspace viewer+ |
 | `admin` | `GET /tenants/{id}/usage`, `GET /tenants/{id}/audit-log` | tenant admin+ |

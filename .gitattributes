@@ -1,0 +1,11 @@
+# Never apply line-ending normalization to binary fixtures/assets — core.autocrlf=true on
+# Windows will otherwise silently corrupt any byte sequence that coincidentally looks like a
+# line ending.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary

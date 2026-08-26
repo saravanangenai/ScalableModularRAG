@@ -38,7 +38,7 @@ The first three per `08-roadmap.md`:
 |---|---|---|
 | `010-metadata-db-and-object-storage` | Postgres schema + migrations, S3/MinIO wiring | done |
 | `011-auth-and-workspaces` | IdP integration, tenant/workspace membership, API auth middleware | done |
-| `020-async-ingestion-pipeline` | Celery/Redis job queue, parser workers, status endpoints | not started |
+| `020-async-ingestion-pipeline` | Celery/Redis job queue, parser workers, status endpoints | done |
 
 Add a row here every time a new `specs/<NNN-slug>/` folder is created (`.claude/skills/spec/SKILL.md`
 Stage 1). Status values: `draft` -> `approved` -> `in-progress` -> `done`.

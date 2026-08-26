@@ -28,6 +28,10 @@ services:
     networks:
       - mm-rag-net
 
+  # Local native-Windows dev (020-async-ingestion-pipeline) uses Memurai instead of this
+  # service — Redis itself doesn't support Windows. Memurai is Redis-protocol-compatible and
+  # was used unauthenticated on localhost:6379 for local dev; this compose service keeps a
+  # real Redis with a password for parity/non-Windows environments.
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -45,7 +49,7 @@ services:
       - mm-rag-net
 
   qdrant:
-    image: qdrant/qdrant:v1.12.1
+    image: qdrant/qdrant:v1.19.0
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage

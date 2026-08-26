@@ -5,6 +5,8 @@ from packages.exceptions.auth import (
 )
 from packages.exceptions.base import DocumentPortalException
 from packages.exceptions.db import DatabaseError
+from packages.exceptions.ingestion import IngestionError
+from packages.exceptions.parsing import ParsingError
 from packages.exceptions.storage import ObjectStorageError
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "AuthenticationError",
     "AuthorizationError",
     "MembershipNotFoundError",
+    "ParsingError",
+    "IngestionError",
 ]
