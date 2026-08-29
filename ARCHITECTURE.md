@@ -14,23 +14,23 @@ work, extensions pending · **planned** = directory stub only, waiting on its sp
 flowchart TB
     users([Users])
 
-    subgraph clients [Client apps]
+    subgraph clients ["Client apps"]
         webui["Web UI (Vue.js)<br/>apps/UI · planned"]
         admin["Streamlit admin<br/>apps/streamlit-admin · planned"]
     end
 
-    subgraph api_layer [API layer]
+    subgraph api_layer ["API layer"]
         api["API Gateway / Auth (FastAPI)<br/>apps/api · built<br/>JWT verify · RBAC guards · routing<br/>routers: auth, tenants, workspaces, documents, jobs"]
     end
 
-    subgraph services [Domain services — packages/*]
+    subgraph services ["Domain services — packages/*"]
         ingestion["Ingestion Service<br/>packages/ingestion · built<br/>parse → chunk → embed → index · versioning"]
         parsing["Parser Workers<br/>packages/parsing · partial<br/>text / OCR / tables / images (vision captioning planned)"]
         retrieval["Retrieval Service<br/>packages/retrieval · planned<br/>dense + sparse · RRF fusion · rerank · mandatory ACL filter"]
         generation["Generation Service<br/>packages/generation · planned<br/>multimodal LLM · citation build"]
     end
 
-    subgraph infra_layer [Infrastructure]
+    subgraph infra_layer ["Infrastructure"]
         queue["Job Queue<br/>Redis + Celery · built<br/>workers/celery_app.py"]
         storage["Object Storage (S3 / MinIO)<br/>packages/storage · built<br/>raw PDFs · extracted images"]
         qdrant["Qdrant<br/>vectors + filtered payload<br/>infra only"]
@@ -41,12 +41,12 @@ flowchart TB
 
     users --> webui
     users --> admin
-    webui -->|HTTPS / JSON (OpenAPI)| api
-    admin -->|HTTPS / JSON (OpenAPI)| api
+    webui -->|"HTTPS / JSON (OpenAPI)"| api
+    admin -->|"HTTPS / JSON (OpenAPI)"| api
 
     api --> ingestion
     api --> retrieval
-    api -->|chat / admin routes · planned| generation
+    api -->|"chat / admin routes · planned"| generation
 
     ingestion --> queue
     queue --> parsing
