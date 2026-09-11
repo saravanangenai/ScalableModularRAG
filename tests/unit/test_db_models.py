@@ -1,9 +1,7 @@
-from packages.db.models import TENANT_SCOPED_TABLES, Base
+from packages.db.models import Base
 
 EXPECTED_TABLES = {
-    "tenants",
     "users",
-    "tenant_members",
     "workspaces",
     "workspace_members",
     "documents",
@@ -14,7 +12,6 @@ EXPECTED_TABLES = {
     "message_feedback",
     "api_keys",
     "audit_log",
-    "usage_quotas",
 }
 
 
@@ -22,10 +19,14 @@ def test_every_data_model_table_is_registered():
     assert set(Base.metadata.tables.keys()) == EXPECTED_TABLES
 
 
-def test_tenant_scoped_tables_have_tenant_id_column():
-    for table_name in TENANT_SCOPED_TABLES:
-        table = Base.metadata.tables[table_name]
-        assert "tenant_id" in table.columns, f"{table_name} is missing tenant_id"
+def test_no_table_carries_a_tenant_id_column():
+    for table_name, table in Base.metadata.tables.items():
+        assert "tenant_id" not in table.columns, f"{table_name} still has tenant_id"
+
+
+def test_api_keys_and_audit_log_are_workspace_scoped():
+    assert "workspace_id" in Base.metadata.tables["api_keys"].columns
+    assert "workspace_id" in Base.metadata.tables["audit_log"].columns
 
 
 def test_document_versions_unique_per_document_and_version_number():

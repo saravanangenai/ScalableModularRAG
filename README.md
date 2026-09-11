@@ -1,8 +1,12 @@
 # MM-RAG Platform
 
-A multi-tenant, production-grade **multimodal RAG platform over PDFs** — text, OCR, tables,
+A production-grade **multimodal RAG platform over PDFs** — text, OCR, tables,
 and images — built as a modular monorepo: multiple deployable apps, shared business logic in
 internal `packages/*`, service boundaries enforced as import boundaries.
+
+Single-tenant as-built ([`specs/012`](specs/012-single-tenant-simplification/spec.md)): IdP
+login + per-workspace owner/editor/viewer RBAC, no tenant layer. Multi-tenancy is the
+deferred target (roadmap Phase 10).
 
 The single-process Streamlit prototype it replaces lives in a separate sibling repo; nothing
 has been ported in directly — see
@@ -20,19 +24,19 @@ has been ported in directly — see
 
 ## Current state
 
-Phases 0–3 of the roadmap are implemented:
+Phases 0–3 of the roadmap are implemented (with `012` simplifying tenancy):
 
-- **Metadata DB** (`packages/db`) — PostgreSQL schema, SQLAlchemy models, Alembic migrations,
-  Row-Level Security for tenant isolation.
+- **Metadata DB** (`packages/db`) — PostgreSQL schema, SQLAlchemy models, Alembic migrations.
+  Single-tenant: workspace-scoped, application-layer isolation (no Row-Level Security).
 - **Object storage** (`packages/storage`) — S3 / MinIO client for raw PDFs and extracted images.
-- **Auth & workspaces** (`packages/auth`, `apps/api`) — Keycloak-backed JWT verification, API
-  keys, RBAC guards, tenant / workspace membership; routers for `auth`, `tenants`,
-  `workspaces`, `documents`, `jobs`.
+- **Auth & workspaces** (`packages/auth`, `apps/api`) — Keycloak-backed JWT verification,
+  workspace-scoped API keys, per-workspace RBAC guards, workspace membership; routers for
+  `workspaces`, `api_keys`, `documents`, `jobs`.
 - **Async ingestion** (`packages/parsing`, `packages/ingestion`, `workers/celery_app.py`) —
   Celery + Redis queue, parser workers (text / OCR / tables / images), job status endpoints,
   content-hash versioning, Qdrant collection setup.
 
-Not yet built: tenant/RBAC retrieval filtering, hybrid retrieval + reranking, vision
+Not yet built: workspace/RBAC retrieval filtering, hybrid retrieval + reranking, vision
 captioning & table intelligence, evaluation + full observability, the Vue.js frontend.
 `packages/retrieval` and `packages/generation` are stubs. See [`ARCHITECTURE.md`](ARCHITECTURE.md)
 for the per-package breakdown.
@@ -72,7 +76,7 @@ only, never by the `apps/api` request path — see
 ```bash
 uv run pytest                    # all
 uv run pytest tests/unit         # per-package unit tests
-uv run pytest tests/integration  # cross-service (RLS, RBAC, upload+ingest, ...)
+uv run pytest tests/integration  # cross-service (RBAC, upload+ingest, ...)
 ```
 
 The Postman collection under [`postman/`](postman/) exercises the auth flow against a running API.

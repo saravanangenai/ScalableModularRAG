@@ -6,7 +6,7 @@ import os
 
 from tests.integration.test_upload_and_ingest import (
     _auth,
-    _create_tenant_and_workspace,
+    _create_workspace,
     _poll_job_until_terminal,
 )
 
@@ -16,7 +16,7 @@ CORRUPT_PDF_BYTES = b"%PDF-1.4\n" + os.urandom(256)
 
 
 async def test_corrupt_pdf_fails_the_job_without_damaging_prior_state(api_client, user1_token):
-    _, workspace_id = await _create_tenant_and_workspace(api_client, user1_token)
+    workspace_id = await _create_workspace(api_client, user1_token)
 
     upload_response = await api_client.post(
         f"/workspaces/{workspace_id}/documents",
@@ -49,7 +49,7 @@ async def test_reuploading_identical_corrupt_content_retries_instead_of_short_ci
     """The content_hash_current guard fixed in plan.md's Implementation findings: a
     document whose only version ever failed must NOT be treated as 'unchanged' on a later
     identical re-upload — it must retry."""
-    _, workspace_id = await _create_tenant_and_workspace(api_client, user1_token)
+    workspace_id = await _create_workspace(api_client, user1_token)
 
     first_response = await api_client.post(
         f"/workspaces/{workspace_id}/documents",

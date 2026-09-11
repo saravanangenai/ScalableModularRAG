@@ -2,6 +2,10 @@
 
 - **Status:** approved baseline
 
+> ⚠️ **Single-tenant as-built ([`specs/012`](../012-single-tenant-simplification/spec.md)).**
+> The **indexing** step writes a `workspace_id` payload (no `tenant_id`); object-storage keys
+> are `{workspace_id}/{document_id}/…`. The worker no longer sets an RLS GUC.
+
 ## 1. Current behavior (V1, to be replaced)
 
 `ui/app.py` calls `ComplexPDFParser.parse()` and `MultimodalDocumentIngestion.ingest_pdf()`

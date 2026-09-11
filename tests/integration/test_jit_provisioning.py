@@ -17,7 +17,7 @@ async def test_first_request_provisions_exactly_one_user_row(
     username, password = create_keycloak_user()
     token = mint_token(username, password)
 
-    response = await api_client.get("/tenants", headers=_auth(token))
+    response = await api_client.get("/workspaces", headers=_auth(token))
     assert response.status_code == 200
 
     rows = db_session.scalars(
@@ -35,7 +35,7 @@ async def test_concurrent_first_requests_still_provision_exactly_one_user_row(
     token = mint_token(username, password)
 
     responses = await asyncio.gather(
-        *[api_client.get("/tenants", headers=_auth(token)) for _ in range(5)]
+        *[api_client.get("/workspaces", headers=_auth(token)) for _ in range(5)]
     )
     assert all(r.status_code == 200 for r in responses)
 

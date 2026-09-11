@@ -1,8 +1,14 @@
 # MM-RAG Platform (modular monorepo)
 
 Target modular monorepo for a multimodal RAG platform over PDFs (text, OCR, tables,
-images), built multi-tenant and production-grade from the start. Full design is in
-`specs/` — this file is the short orientation, not a duplicate of it.
+images), built production-grade from the start. Full design is in `specs/` — this file is
+the short orientation, not a duplicate of it.
+
+**Tenancy:** `specs/012-single-tenant-simplification` removed the tenant layer for
+assignment scope — the platform is **single-tenant as-built**: IdP login + workspace
+owner/editor/viewer RBAC, no `tenants` tables, no `tenant_id` columns, no Row-Level
+Security. Multi-tenancy stays the documented long-term target (roadmap Phase 10). The
+architecture docs keep the multi-tenant design, marked ⚠️ DEFERRED.
 
 The original single-process prototype (Streamlit UI calling a `src/*` pipeline directly,
 no API, no auth, no multi-tenancy) lives in a separate sibling repo. Nothing has been
@@ -68,5 +74,5 @@ model, retrieval behavior, or security/tenancy.
   follows), landing in `packages/exceptions/`.
 - Secrets live in `.env` (gitignored) locally; never hold provider API keys (OpenAI, Qdrant,
   reranker) in `apps/UI` or `apps/streamlit-admin` — see `specs/architecture/06-security-model.md` §6.
-- Multi-tenant/auth/retrieval-filter changes always get a `plan.md`, even when they look
+- Auth/tenancy/retrieval-filter changes always get a `plan.md`, even when they look
   small — see `.claude/skills/spec/SKILL.md` ground rules.

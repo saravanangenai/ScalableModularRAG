@@ -3,6 +3,11 @@
 - **Status:** approved baseline (living doc — update in place as specs land)
 - **Supersedes:** V1 prototype (`ui/app.py` calling `src/*` in-process)
 
+> ⚠️ **Single-tenant as-built ([`specs/012`](../012-single-tenant-simplification/spec.md)).**
+> Wherever this doc says "tenant/workspace/ACL" or lists `tenants`/`quotas`, read it as
+> workspace-scoped: no tenant tables, no `tenant_id` payload field, no RLS. Multi-tenancy is
+> the deferred target (roadmap Phase 10).
+
 ## 1. Where we start
 
 Today the entire system is one Python process. `ui/app.py` (Streamlit) imports

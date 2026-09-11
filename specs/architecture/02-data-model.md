@@ -3,6 +3,54 @@
 - **Status:** approved baseline
 - **Stores:** PostgreSQL (system of record) + Qdrant (vector/payload projection)
 
+> ⚠️ **Single-tenant as-built — see [`specs/012-single-tenant-simplification`](../012-single-tenant-simplification/spec.md).**
+> `012` removed the tenant layer for assignment scope: no `tenants` / `tenant_members` /
+> `usage_quotas` tables, no `tenant_id` column on any table, and **no Row-Level Security**.
+> `api_keys` and `audit_log` are workspace-scoped. See §0 below for the live schema. The
+> multi-tenant design in §1–§4 is retained as the deferred target (roadmap Phase 10);
+> parts that are not currently implemented are marked ⚠️ DEFERRED.
+
+## 0. As-built schema (single-tenant)
+
+Live entities after `012`. Isolation is per-workspace, enforced at the application layer
+(every query filters by `workspace_id` behind a `workspace_members` role check).
+
+```
+users                 id, email (unique), display_name,
+                      auth_provider_subject (unique), created_at
+workspaces            id, name, created_by (fk users), created_at
+workspace_members     workspace_id + user_id (pk), role owner|editor|viewer
+documents             id, workspace_id (fk), filename, content_hash_current,
+                      status, current_version_id (fk document_versions, nullable),
+                      created_by, created_at, updated_at
+document_versions     id, document_id (fk), version_number, content_hash,
+                      object_storage_key, page_count, is_current, superseded_at, created_at
+ingestion_jobs        id, document_id (fk), document_version_id (fk), status,
+                      failure_stage, failure_reason, retry_count,
+                      started_at, finished_at, created_at
+conversations         id, workspace_id (fk), created_by, title, is_shared,
+                      share_token (nullable unique), created_at
+messages              id, conversation_id (fk), role user|assistant, content,
+                      sources_json, used_images_json, model_name, usage_json,
+                      latency_ms, created_at
+message_feedback      id, message_id (fk), user_id (fk), rating up|down, comment, created_at
+api_keys              id, workspace_id (fk), key_hash (unique), scopes,
+                      created_by, revoked_at, created_at
+audit_log             id, workspace_id (fk, nullable), actor_user_id (nullable),
+                      action, resource_type, resource_id, metadata_json, created_at
+```
+
+Indexes: `workspace_members(user_id)`, `documents(workspace_id)`,
+`document_versions(document_id, version_number)`, `ingestion_jobs(status)`,
+`conversations(workspace_id)`, `api_keys(workspace_id)`,
+`audit_log(workspace_id, created_at)`. Object-storage keys are
+`{workspace_id}/{document_id}/…`. Qdrant point payload carries `workspace_id` (no
+`tenant_id`); required payload indexes drop `tenant_id`.
+
+---
+
+_The remainder of this document describes the deferred multi-tenant target._
+
 ## 1. Why two stores
 
 PostgreSQL owns identity, ownership, membership, permissions, job state, conversations, and

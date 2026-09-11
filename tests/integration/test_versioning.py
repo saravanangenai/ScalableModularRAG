@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tests.integration.test_upload_and_ingest import (
     _auth,
-    _create_tenant_and_workspace,
+    _create_workspace,
     _poll_job_until_terminal,
 )
 
@@ -14,7 +14,7 @@ FIXTURE_PDF = Path(__file__).resolve().parents[1] / "fixtures" / "sample.pdf"
 
 
 async def test_reuploading_identical_bytes_is_a_no_op(api_client, user1_token):
-    _, workspace_id = await _create_tenant_and_workspace(api_client, user1_token)
+    workspace_id = await _create_workspace(api_client, user1_token)
     pdf_bytes = FIXTURE_PDF.read_bytes()
 
     first_response = await api_client.post(
@@ -54,7 +54,7 @@ async def test_reuploading_identical_bytes_is_a_no_op(api_client, user1_token):
 
 
 async def test_reuploading_changed_bytes_creates_a_new_version(api_client, user1_token):
-    _, workspace_id = await _create_tenant_and_workspace(api_client, user1_token)
+    workspace_id = await _create_workspace(api_client, user1_token)
     original_bytes = FIXTURE_PDF.read_bytes()
     # Append a comment/no-op byte sequence after %%EOF-adjacent content so the hash
     # changes while the file often still parses (PyMuPDF tolerates trailing garbage).

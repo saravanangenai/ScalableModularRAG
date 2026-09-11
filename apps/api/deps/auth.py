@@ -16,9 +16,9 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     session: AsyncSession = Depends(get_db_session),
 ) -> User:
-    """JWT-only identity resolution (no API key support) — used by routes with no
-    tenant/workspace in the path yet (creating a tenant, listing my own tenants), where an
-    API key (which is always scoped to one tenant already) wouldn't make sense."""
+    """JWT-only identity resolution (no API key support) — used by routes with no workspace
+    in the path yet (creating a workspace, listing the workspaces I belong to), where a
+    workspace-scoped API key wouldn't make sense."""
     if credentials is None:
         raise AuthenticationError("missing bearer token")
 

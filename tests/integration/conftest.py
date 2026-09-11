@@ -135,9 +135,10 @@ def create_keycloak_user(keycloak_settings):
 
 @pytest.fixture(scope="session")
 def db_engine():
-    """Runs the real Alembic migration (tables + indexes + RLS policies) against the live
-    Postgres in infra/docker-compose.yml once per test session, then reverts it. Requires
-    `docker compose up -d postgres` and infra/.env populated from infra/.env.example."""
+    """Runs the real Alembic migration (tables + indexes, single-tenant schema — no RLS)
+    against the live Postgres in infra/docker-compose.yml once per test session, then
+    reverts it. Requires `docker compose up -d postgres` and infra/.env populated from
+    infra/.env.example."""
     alembic_cfg = Config(str(REPO_ROOT / "alembic.ini"))
     command.upgrade(alembic_cfg, "head")
 

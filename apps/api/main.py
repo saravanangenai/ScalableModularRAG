@@ -3,8 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from apps.api.routers import auth as auth_router
-from apps.api.routers import documents, jobs, tenants, workspaces
+from apps.api.routers import api_keys, documents, jobs, workspaces
 from packages.db.session import get_async_sessionmaker
 from packages.exceptions import AuthenticationError, AuthorizationError, MembershipNotFoundError
 
@@ -34,9 +33,8 @@ def create_app() -> FastAPI:
     async def _membership_not_found_handler(request: Request, exc: MembershipNotFoundError):
         return JSONResponse(status_code=404, content={"detail": "not found"})
 
-    app.include_router(tenants.router)
     app.include_router(workspaces.router)
-    app.include_router(auth_router.router)
+    app.include_router(api_keys.router)
     app.include_router(documents.router)
     app.include_router(jobs.router)
 

@@ -16,7 +16,7 @@ def _default_jwk_client(issuer_url: str) -> PyJWKClient:
 def verify_token(token: str, settings: Settings | None = None, jwk_client: PyJWKClient | None = None) -> dict:
     """Verifies a bearer JWT's signature, expiry, issuer, and audience against the
     configured Keycloak realm. Returns the decoded claims on success. Never trusts a
-    tenant_id/role claim even if present — callers must re-derive scope from Postgres."""
+    workspace/role claim even if present — callers must re-derive scope from Postgres."""
     settings = settings or Settings()
     client = jwk_client or _default_jwk_client(settings.keycloak_issuer_url)
 

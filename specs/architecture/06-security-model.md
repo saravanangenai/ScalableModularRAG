@@ -2,6 +2,15 @@
 
 - **Status:** approved baseline
 
+> ⚠️ **Single-tenant as-built — see [`specs/012-single-tenant-simplification`](../012-single-tenant-simplification/spec.md).**
+> The tenant layer is removed. Authentication (§2, JWT verification, JIT provisioning) is
+> unchanged. Authorization is **workspace RBAC only** — no tenant role ladder (§3). The
+> mandatory retrieval-time filter (§4) uses `workspace_id` as its sole server-constructed
+> dimension. Postgres Row-Level Security (§5) is **not implemented** — application-layer
+> workspace filtering is the enforcement, with RLS + the Qdrant retrieval filter deferred to
+> Phase 4. `audit_log` (§7) is workspace-scoped. Tenant-specific text below is marked
+> ⚠️ DEFERRED (roadmap Phase 10).
+
 ## 1. Current state (V1)
 
 There is no authentication, no authorization, and no tenant concept — `ui/app.py` is a
@@ -34,12 +43,13 @@ query without that filter searches the entire collection.
 
 ## 3. Authorization
 
-RBAC at two levels, both backed by `02-data-model.md`:
+RBAC, backed by `02-data-model.md`:
 
-- **Tenant role** (`tenant_members.role`: owner/admin/member) — controls tenant-wide actions
-  (billing, inviting members, creating workspaces).
 - **Workspace role** (`workspace_members.role`: owner/editor/viewer) — controls per-workspace
   actions (upload documents = editor+, delete documents = owner, ask questions = viewer+).
+  Any authenticated user can create a workspace and becomes its `owner`.
+- ⚠️ DEFERRED — **Tenant role** (`tenant_members.role`: owner/admin/member) — would control
+  tenant-wide actions (billing, inviting members, creating workspaces). Removed by `012`.
 
 Every API route declares the minimum role it requires; a shared dependency
 (`require_role(workspace_role="viewer")`-style guard) resolves the caller's role for the
@@ -55,11 +65,12 @@ explicitly is *where* it's enforced next.
    workspace, any finer-grained document ACL) from Postgres — never from client-supplied
    input.
 2. The Retrieval Service (`04-retrieval-design.md`) receives that resolved
-   `tenant_id`/`workspace_id`/ACL set as a **server-constructed** Qdrant filter, applied to
+   `workspace_id`/ACL set as a **server-constructed** Qdrant filter, applied to
    both the dense and sparse legs before fusion — the same `must=[FieldCondition(...)]`
-   pattern `src/retriever.py::build_filter` already uses, just with tenant/workspace/ACL
+   pattern `src/retriever.py::build_filter` already uses, just with workspace/ACL
    conditions that are never optional and never client-editable (unlike today's
    `filename`/`content_types`/`page_number` filters, which remain optional/client-chosen).
+   (Deferred multi-tenant target would add a `tenant_id` condition alongside `workspace_id`.)
 3. A request that omits a workspace scope is rejected, not defaulted to "search everything" —
    the current V1 default behavior (search the whole collection unless a filter is manually
    set) is the exact failure mode this must not reproduce in production.
@@ -67,18 +78,20 @@ explicitly is *where* it's enforced next.
    against a workspace user A cannot access, returns zero results and a 403/404 at the API
    layer — not just "correct" results that happen to be filtered client-side.
 
-## 5. Tenant isolation strategy
+## 5. Isolation strategy
 
 - **Payload-based partitioning** in a shared Qdrant collection (assignment 3.4's explicit
-  guidance — not a collection per user), with `tenant_id`/`workspace_id` payload indexes for
-  fast, mandatory filtering (`02-data-model.md` §3).
-- **Defense in depth**: Postgres Row-Level Security policies (`02-data-model.md` §2) as a
-  second, independent enforcement layer for anything queried directly from Postgres
-  (conversations, documents, audit log), so a bug in application-layer filtering isn't the
-  only thing standing between tenants.
-- **No cross-tenant identifiers leak in error messages** — a 404 for "document doesn't exist"
-  and a 404 for "document exists but you can't see it" must be indistinguishable, so probing
-  IDs can't be used to enumerate other tenants' data.
+  guidance — not a collection per user), with a `workspace_id` payload index for fast,
+  mandatory filtering (`02-data-model.md` §0/§3).
+- **Application-layer enforcement**: every Postgres query filters by `workspace_id` behind a
+  `workspace_members` role check resolved server-side.
+- ⚠️ DEFERRED — **Defense in depth via Postgres Row-Level Security** (`02-data-model.md` §2).
+  Removed with the tenant GUC it depended on in `012`. Phase 4 owns re-adding workspace-scoped
+  RLS and the mandatory Qdrant retrieval filter together, with the retrieval-bypass threat
+  model in focus.
+- **No cross-workspace identifiers leak in error messages** — a 404 for "document doesn't
+  exist" and a 404 for "document exists but you can't see it" must be indistinguishable, so
+  probing IDs can't be used to enumerate other workspaces' data.
 
 ## 6. Secrets management
 
@@ -98,8 +111,9 @@ explicitly is *where* it's enforced next.
 Every security-relevant action writes an `audit_log` row (`02-data-model.md`): document
 upload/delete, workspace membership changes, role changes, API key creation/revocation, and
 (configurable, since it's high-volume) chat queries. Audit log is append-only from the
-application's perspective (no update/delete API), queryable by tenant admins for their own
-tenant only, and retained per the tenant's plan tier.
+application's perspective (no update/delete API); rows carry a nullable `workspace_id` and
+are queryable by that workspace's `owner`. (Deferred: per-tenant scoping and plan-tier
+retention.)
 
 ## 8. Related docs
 

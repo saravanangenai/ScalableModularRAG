@@ -2,10 +2,9 @@ from qdrant_client import QdrantClient, models
 
 from packages.exceptions import IngestionError
 
-# Payload indexes required for the mandatory tenant/workspace filtering a later phase adds,
+# Payload indexes required for the mandatory workspace filtering a later phase adds,
 # per specs/architecture/02-data-model.md §3.
 REQUIRED_PAYLOAD_INDEXES: dict[str, models.PayloadSchemaType] = {
-    "tenant_id": models.PayloadSchemaType.KEYWORD,
     "workspace_id": models.PayloadSchemaType.KEYWORD,
     "document_id": models.PayloadSchemaType.KEYWORD,
     "document_version_id": models.PayloadSchemaType.KEYWORD,

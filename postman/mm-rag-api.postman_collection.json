@@ -1,0 +1,609 @@
+{
+  "info": {
+    "name": "MM-RAG API (all endpoints, single-tenant)",
+    "_postman_id": "mm-rag-api-full",
+    "description": "Every apps/api endpoint, runnable against a local stack. Single-tenant as-built (specs/012): no /tenants routes.\n\n## One-time setup\n1. Import this file. No separate environment needed — every value below has a local default baked in as a collection variable.\n2. Set `clientSecret` (collection variable) to infra/.env's KEYCLOAK_TEST_CLIENT_SECRET.\n3. Start the stack: `docker compose -f infra/docker-compose.yml up -d` (postgres, redis, qdrant, minio), Keycloak on :8080 (`uv run python scripts/setup_keycloak_dev.py`), the API (`uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000`), and a worker (`uv run celery -A workers.celery_app worker --pool=solo`).\n\n## Run order (folders top to bottom)\n`Health` -> `Auth` -> `Workspaces` -> `Members` -> `API Keys` -> `Documents` -> `Jobs`.\nTest scripts capture ids (`workspaceId`, `apiKeyId`, `documentId`, `jobId`, ...) into collection variables, so later requests just work. Every id also has a placeholder default you can overwrite by hand to run a request in isolation.\n\n## Auth model\n- Bearer JWT from Keycloak for everything.\n- A workspace-scoped API key (`mmrag_...`) is also accepted as a bearer on `/workspaces/{id}/*` read routes (owner-equivalent); write routes still need a user JWT.\n- Not a member of the target workspace -> 404 (indistinguishable from 'does not exist'). Member but role too low -> 403.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000", "type": "string" },
+    { "key": "keycloakUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "realm", "value": "mm-rag", "type": "string" },
+    { "key": "clientId", "value": "mm-rag-api", "type": "string" },
+    { "key": "clientSecret", "value": "", "type": "string" },
+
+    { "key": "username", "value": "testuser", "type": "string" },
+    { "key": "password", "value": "testuser-changeme", "type": "string" },
+    { "key": "username2", "value": "testuser2", "type": "string" },
+    { "key": "password2", "value": "testuser2-changeme", "type": "string" },
+
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "accessToken2", "value": "", "type": "string" },
+
+    { "key": "workspaceId", "value": "00000000-0000-0000-0000-000000000000", "type": "string" },
+    { "key": "user2Id", "value": "00000000-0000-0000-0000-000000000000", "type": "string" },
+    { "key": "apiKeyId", "value": "00000000-0000-0000-0000-000000000000", "type": "string" },
+    { "key": "apiKeyPlaintext", "value": "mmrag_replace_me", "type": "string" },
+    { "key": "documentId", "value": "00000000-0000-0000-0000-000000000000", "type": "string" },
+    { "key": "documentVersionId", "value": "00000000-0000-0000-0000-000000000000", "type": "string" },
+    { "key": "jobId", "value": "00000000-0000-0000-0000-000000000000", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST Keycloak token - user 1",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": {
+              "raw": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+              "host": ["{{keycloakUrl}}"],
+              "path": ["realms", "{{realm}}", "protocol", "openid-connect", "token"]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "{{clientId}}" },
+                { "key": "client_secret", "value": "{{clientSecret}}" },
+                { "key": "username", "value": "{{username}}" },
+                { "key": "password", "value": "{{password}}" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', j.access_token);",
+                  "pm.test('has token', () => pm.expect(j.access_token).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST Keycloak token - user 2",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": {
+              "raw": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+              "host": ["{{keycloakUrl}}"],
+              "path": ["realms", "{{realm}}", "protocol", "openid-connect", "token"]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "{{clientId}}" },
+                { "key": "client_secret", "value": "{{clientSecret}}" },
+                { "key": "username", "value": "{{username2}}" },
+                { "key": "password", "value": "{{password2}}" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('accessToken2', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces (as user 2 - JIT-provisions user 2's row)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken2}}" }] },
+            "url": { "raw": "{{baseUrl}}/workspaces", "host": ["{{baseUrl}}"], "path": ["workspaces"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "// There is no GET /me yet. To get user 2's internal id for the Members folder, run:",
+                  "//   psql -U mmrag -h localhost -d mmrag -c \"SELECT id FROM users WHERE email = 'testuser2@example.com';\"",
+                  "// then set the collection variable `user2Id` to that UUID."
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Workspaces",
+      "item": [
+        {
+          "name": "POST /workspaces (create; caller becomes owner)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/workspaces", "host": ["{{baseUrl}}"], "path": ["workspaces"] },
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Acme Research\"\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('workspaceId', j.id);",
+                  "pm.test('has id + name', () => { pm.expect(j.id).to.be.a('string'); pm.expect(j.name).to.eql('Acme Research'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces (list mine)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/workspaces", "host": ["{{baseUrl}}"], "path": ["workspaces"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('includes the created workspace', () => {",
+                  "  const ids = pm.response.json().map(w => w.id);",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('workspaceId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "item": [
+        {
+          "name": "POST /workspaces/{workspaceId}/members (add user 2 as viewer)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/members",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "members"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"{{user2Id}}\",\n  \"role\": \"viewer\"\n}" },
+            "description": "Requires `user2Id`. Run Auth > 'GET /workspaces (as user 2 ...)' first, then look the id up in Postgres (see that request's test script)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('201', () => pm.response.to.have.status(201));"] }
+            }
+          ]
+        },
+        {
+          "name": "PATCH /workspaces/{workspaceId}/members/{user2Id} (promote to editor)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/members/{{user2Id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "members", "{{user2Id}}"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"editor\"\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /workspaces/{workspaceId}/members/{user2Id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/members/{{user2Id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "members", "{{user2Id}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('204', () => pm.response.to.have.status(204));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "POST /workspaces/{workspaceId}/api-keys (create; plaintext returned once)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "api-keys"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"scopes\": [\"documents:read\", \"chat:write\"]\n}" }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "pm.test('mmrag_ prefix', () => pm.expect(j.key).to.match(/^mmrag_/));",
+                  "pm.collectionVariables.set('apiKeyId', j.id);",
+                  "pm.collectionVariables.set('apiKeyPlaintext', j.key);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces/{workspaceId}/api-keys (list; no hash/plaintext)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "api-keys"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('no key material', () => {",
+                  "  for (const k of pm.response.json()) {",
+                  "    pm.expect(k).to.not.have.property('key');",
+                  "    pm.expect(k).to.not.have.property('key_hash');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces/{workspaceId}/documents (auth with the API key)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{apiKeyPlaintext}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents"]
+            },
+            "description": "Shows a workspace-scoped API key working as a bearer credential on a read route."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /workspaces/{workspaceId}/api-keys/{apiKeyId} (revoke)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/api-keys/{{apiKeyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "api-keys", "{{apiKeyId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('204', () => pm.response.to.have.status(204));"] }
+            }
+          ]
+        },
+        {
+          "name": "GET documents with revoked key -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{apiKeyPlaintext}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "POST /workspaces/{workspaceId}/documents (upload PDF; editor+)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "tests/fixtures/sample.pdf",
+                  "description": "Attach a PDF. Postman resolves this path relative to its working dir; if it fails, click and pick tests/fixtures/sample.pdf yourself. Content-Type must be application/pdf and the bytes must start with %PDF-."
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('202 (new/changed) or 200 (unchanged)', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('documentId', j.document_id);",
+                  "pm.collectionVariables.set('documentVersionId', j.document_version_id);",
+                  "if (j.job_id) pm.collectionVariables.set('jobId', j.job_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces/{workspaceId}/documents (list; viewer+)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces/{workspaceId}/documents/{documentId}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents", "{{documentId}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('has status field', () => pm.expect(pm.response.json()).to.have.property('status'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /workspaces/{workspaceId}/documents/{documentId}/versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents/{{documentId}}/versions",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents", "{{documentId}}", "versions"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('is a list', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "GET /workspaces/{workspaceId}/jobs/{jobId} (poll until ready/failed)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/jobs/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "jobs", "{{jobId}}"]
+            },
+            "description": "Re-send until status is 'ready' or 'failed'. Requires a running Celery worker. Status flow: queued -> parsing -> chunking -> embedding -> indexing -> ready."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "console.log('job status:', j.status, j.failure_reason || '');",
+                  "pm.test('known status', () => pm.expect(j.status).to.be.oneOf(['queued','parsing','chunking','embedding','indexing','ready','failed']));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Negative & RBAC",
+      "item": [
+        {
+          "name": "GET /workspaces with no token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/workspaces", "host": ["{{baseUrl}}"], "path": ["workspaces"] }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] } }
+          ]
+        },
+        {
+          "name": "GET /workspaces with garbage token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "not-a-real-jwt" }] },
+            "url": { "raw": "{{baseUrl}}/workspaces", "host": ["{{baseUrl}}"], "path": ["workspaces"] }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('401', () => pm.response.to.have.status(401));"] } }
+          ]
+        },
+        {
+          "name": "GET documents in a workspace I don't belong to -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/00000000-0000-0000-0000-000000000000/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "00000000-0000-0000-0000-000000000000", "documents"]
+            },
+            "description": "Per 06-security-model.md §5: a non-member gets 404, not 403 — 'does not exist' and 'exists but hidden' must be indistinguishable."
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('404', () => pm.response.to.have.status(404));"] } }
+          ]
+        },
+        {
+          "name": "Viewer tries an owner action (add member) -> 403",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken2}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/members",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "members"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"{{user2Id}}\",\n  \"role\": \"editor\"\n}" },
+            "description": "Run 'Members > POST ... add user 2 as viewer' first. user 2 is a viewer; adding members needs owner."
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('403', () => pm.response.to.have.status(403));"] } }
+          ]
+        },
+        {
+          "name": "Viewer CAN list documents (viewer+) -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken2}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/workspaces/{{workspaceId}}/documents",
+              "host": ["{{baseUrl}}"],
+              "path": ["workspaces", "{{workspaceId}}", "documents"]
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": ["pm.test('200', () => pm.response.to.have.status(200));"] } }
+          ]
+        }
+      ]
+    }
+  ]
+}

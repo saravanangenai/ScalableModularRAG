@@ -30,6 +30,8 @@ async def upload_document(
     access: WorkspaceAccess = Depends(require_workspace_role("editor")),
     session: AsyncSession = Depends(get_db_session),
 ) -> UploadAccepted | UploadUnchanged:
+    if access.user is None:
+        raise HTTPException(status_code=401, detail="uploading requires user authentication")
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=415, detail="only PDF uploads are supported")
 
@@ -62,7 +64,6 @@ async def upload_document(
     if existing_document is None:
         document = Document(
             workspace_id=access.workspace_id,
-            tenant_id=access.tenant_id,
             filename=file.filename,
             content_hash_current=file_hash,
             status="queued",
@@ -81,12 +82,11 @@ async def upload_document(
         )
         version_number = (latest_version_number or 0) + 1
 
-    storage_key = document_key(access.tenant_id, access.workspace_id, document.id, file_hash)
+    storage_key = document_key(access.workspace_id, document.id, file_hash)
     StorageClient().upload(storage_key, data)
 
     document_version = DocumentVersion(
         document_id=document.id,
-        tenant_id=access.tenant_id,
         version_number=version_number,
         content_hash=file_hash,
         object_storage_key=storage_key,
@@ -99,7 +99,6 @@ async def upload_document(
     job = IngestionJob(
         document_id=document.id,
         document_version_id=document_version.id,
-        tenant_id=access.tenant_id,
         status="queued",
         retry_count=0,
     )
@@ -108,7 +107,7 @@ async def upload_document(
 
     await session.commit()
 
-    run_ingestion_job.delay(str(job.id), str(access.tenant_id))
+    run_ingestion_job.delay(str(job.id))
 
     response.status_code = 202
     return UploadAccepted(

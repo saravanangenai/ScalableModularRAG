@@ -40,3 +40,7 @@ Thumbs.db
 # Stray marker file Qdrant writes to its working directory if started from repo root
 # (020-async-ingestion-pipeline local dev)
 .qdrant-initialized
+
+# Local dev process logs / personal notes
+*.log
+start_services_from_terminal.txt

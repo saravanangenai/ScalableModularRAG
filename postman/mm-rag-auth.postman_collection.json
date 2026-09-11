@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "MM-RAG Auth (011-auth-and-workspaces)",
+    "name": "MM-RAG Auth (011-auth-and-workspaces, single-tenant per 012)",
     "_postman_id": "mm-rag-auth-011",
-    "description": "Exercises apps/api's auth + tenant/workspace/membership/api-key routes against real Keycloak + Postgres (no mocks). Run folders top to bottom on a fresh run: Auth -> Tenants -> Workspaces -> API Keys -> Negative/RBAC.\n\nSetup:\n1. Import the companion environment file (mm-rag-local.postman_environment.json) and select it.\n2. Fill in `client_secret` from infra/.env's KEYCLOAK_TEST_CLIENT_SECRET (left blank here deliberately — never commit a real secret into this file).\n3. Make sure apps/api is running (`uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000`) and Keycloak is running (`http://localhost:8080`).\n\nKnown gap: there is no GET /me endpoint yet, so getting User 2's *internal* user id (needed for the 'Add Tenant Member' request) requires a direct DB lookup after User 2's first authenticated call (JIT-provisioning) has run:\n  psql -U mmrag -h localhost -d mmrag -c \"SELECT id FROM users WHERE email = 'testuser2@example.com';\"\nPaste that id into the `user2_internal_id` variable. See the 'Add Tenant Member (user2)' request description for the exact step.",
+    "description": "Exercises apps/api's auth + workspace/membership/api-key routes against real Keycloak + Postgres (no mocks). Single-tenant as-built (specs/012): no /tenants routes. Run folders top to bottom on a fresh run: Auth -> Workspaces & Members -> API Keys -> Negative/RBAC.\n\nSetup:\n1. Import the companion environment file (mm-rag-local.postman_environment.json) and select it.\n2. Fill in `client_secret` from infra/.env's KEYCLOAK_TEST_CLIENT_SECRET (left blank here deliberately — never commit a real secret into this file).\n3. Make sure apps/api is running (`uv run uvicorn apps.api.main:app --host 127.0.0.1 --port 8000`) and Keycloak is running (`http://localhost:8080`).\n\nKnown gap: there is no GET /me endpoint yet, so getting User 2's *internal* user id (needed for the 'Add Workspace Member' request) requires a direct DB lookup after User 2's first authenticated call (JIT-provisioning) has run:\n  psql -U mmrag -h localhost -d mmrag -c \"SELECT id FROM users WHERE email = 'testuser2@example.com';\"\nPaste that id into the `user2_internal_id` variable. See the 'Add Workspace Member (user2)' request description for the exact step.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -18,7 +18,6 @@
     { "key": "access_token_1", "value": "", "type": "string" },
     { "key": "access_token_2", "value": "", "type": "string" },
     { "key": "user2_internal_id", "value": "", "type": "string" },
-    { "key": "tenant_id", "value": "", "type": "string" },
     { "key": "workspace_id", "value": "", "type": "string" },
     { "key": "api_key_id", "value": "", "type": "string" },
     { "key": "api_key_plaintext", "value": "", "type": "string" }
@@ -119,72 +118,35 @@
               }
             }
           ]
+        },
+        {
+          "name": "Provision User 2 (any authed call JIT-creates the users row)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_2}}" }] },
+            "url": { "raw": "{{base_url}}/workspaces", "host": ["{{base_url}}"], "path": ["workspaces"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test('status 200', () => pm.response.to.have.status(200));"] }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "2 - Tenants & Workspaces",
+      "name": "2 - Workspaces & Members",
       "item": [
         {
-          "name": "Create Tenant (as User 1 -> becomes owner)",
+          "name": "Create Workspace (any authed user -> becomes owner)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
-            "url": { "raw": "{{base_url}}/tenants", "host": ["{{base_url}}"], "path": ["tenants"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Postman Test Tenant\",\n  \"slug\": \"postman-{{$randomUUID}}\"\n}"
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('status 201', () => pm.response.to.have.status(201));",
-                  "const json = pm.response.json();",
-                  "pm.collectionVariables.set('tenant_id', json.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List My Tenants",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
-            "url": { "raw": "{{base_url}}/tenants", "host": ["{{base_url}}"], "path": ["tenants"] }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('includes created tenant', () => {",
-                  "  const ids = pm.response.json().map(t => t.id);",
-                  "  pm.expect(ids).to.include(pm.collectionVariables.get('tenant_id'));",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create Workspace (tenant admin+)",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
-            "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
-              "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
-            },
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Postman Workspace\"\n}" }
+            "url": { "raw": "{{base_url}}/workspaces", "host": ["{{base_url}}"], "path": ["workspaces"] },
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Postman Workspace {{$randomUUID}}\"\n}" }
           },
           "event": [
             {
@@ -200,40 +162,44 @@
           ]
         },
         {
-          "name": "List Workspaces",
+          "name": "List My Workspaces",
           "request": {
             "method": "GET",
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
-            "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
-              "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
-            }
+            "url": { "raw": "{{base_url}}/workspaces", "host": ["{{base_url}}"], "path": ["workspaces"] }
           },
           "event": [
             {
               "listen": "test",
-              "script": { "exec": ["pm.test('status 200', () => pm.response.to.have.status(200));"] }
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('includes created workspace', () => {",
+                  "  const ids = pm.response.json().map(w => w.id);",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('workspace_id'));",
+                  "});"
+                ]
+              }
             }
           ]
         },
         {
-          "name": "Add Tenant Member (user2)",
+          "name": "Add Workspace Member (user2 as viewer)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/members",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/members",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "members"]
+              "path": ["workspaces", "{{workspace_id}}", "members"]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"user_id\": \"{{user2_internal_id}}\",\n  \"role\": \"member\"\n}"
+              "raw": "{\n  \"user_id\": \"{{user2_internal_id}}\",\n  \"role\": \"viewer\"\n}"
             },
-            "description": "REQUIRES `user2_internal_id` to be set first:\n1. Run 'Get Token - User 2' then any authenticated request as User 2 (e.g. duplicate 'List My Tenants' with access_token_2) — this JIT-provisions their `users` row.\n2. Look up their internal id: `psql -U mmrag -h localhost -d mmrag -c \"SELECT id FROM users WHERE email = 'testuser2@example.com';\"`\n3. Set the `user2_internal_id` collection variable to that UUID.\nThere is no GET /me endpoint yet to automate this step."
+            "description": "REQUIRES `user2_internal_id` to be set first:\n1. Run '1 - Auth' fully (including 'Provision User 2') so User 2's `users` row exists.\n2. Look up their internal id: `psql -U mmrag -h localhost -d mmrag -c \"SELECT id FROM users WHERE email = 'testuser2@example.com';\"`\n3. Set the `user2_internal_id` collection variable to that UUID.\nThere is no GET /me endpoint yet to automate this step."
           },
           "event": [
             {
@@ -248,15 +214,15 @@
       "name": "3 - API Keys",
       "item": [
         {
-          "name": "Create API Key",
+          "name": "Create API Key (workspace owner)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/api-keys",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/api-keys",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "api-keys"]
+              "path": ["workspaces", "{{workspace_id}}", "api-keys"]
             },
             "body": { "mode": "raw", "raw": "{\n  \"scopes\": [\"documents:read\"]\n}" }
           },
@@ -282,9 +248,9 @@
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{api_key_plaintext}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/documents",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
+              "path": ["workspaces", "{{workspace_id}}", "documents"]
             }
           },
           "event": [
@@ -301,9 +267,9 @@
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/api-keys",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/api-keys",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "api-keys"]
+              "path": ["workspaces", "{{workspace_id}}", "api-keys"]
             }
           },
           "event": [
@@ -330,9 +296,9 @@
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/api-keys/{{api_key_id}}",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/api-keys/{{api_key_id}}",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "api-keys", "{{api_key_id}}"]
+              "path": ["workspaces", "{{workspace_id}}", "api-keys", "{{api_key_id}}"]
             }
           },
           "event": [
@@ -349,9 +315,9 @@
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{api_key_plaintext}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/documents",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
+              "path": ["workspaces", "{{workspace_id}}", "documents"]
             }
           },
           "event": [
@@ -371,7 +337,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{base_url}}/tenants", "host": ["{{base_url}}"], "path": ["tenants"] }
+            "url": { "raw": "{{base_url}}/workspaces", "host": ["{{base_url}}"], "path": ["workspaces"] }
           },
           "event": [
             {
@@ -386,7 +352,7 @@
             "method": "GET",
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "not-a-real-jwt" }] },
-            "url": { "raw": "{{base_url}}/tenants", "host": ["{{base_url}}"], "path": ["tenants"] }
+            "url": { "raw": "{{base_url}}/workspaces", "host": ["{{base_url}}"], "path": ["workspaces"] }
           },
           "event": [
             {
@@ -396,17 +362,17 @@
           ]
         },
         {
-          "name": "Valid token, not a tenant member -> 404",
+          "name": "Valid token, not a workspace member -> 404",
           "request": {
             "method": "GET",
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_1}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/00000000-0000-0000-0000-000000000000/workspaces",
+              "raw": "{{base_url}}/workspaces/00000000-0000-0000-0000-000000000000/documents",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "00000000-0000-0000-0000-000000000000", "workspaces"]
+              "path": ["workspaces", "00000000-0000-0000-0000-000000000000", "documents"]
             },
-            "description": "Random tenant id nobody belongs to. Per 06-security-model.md §5, this must be 404, not 403 — a non-member can't distinguish 'doesn't exist' from 'exists but you can't see it'."
+            "description": "Random workspace id nobody belongs to. Per 06-security-model.md §5, this must be 404, not 403 — a non-member can't distinguish 'doesn't exist' from 'exists but you can't see it'."
           },
           "event": [
             {
@@ -416,18 +382,18 @@
           ]
         },
         {
-          "name": "Member role, insufficient for admin action -> 403",
+          "name": "Viewer role, insufficient for owner action -> 403",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_2}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/members",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
+              "path": ["workspaces", "{{workspace_id}}", "members"]
             },
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Should Fail\"\n}" },
-            "description": "Requires 'Add Tenant Member (user2)' to have run first (user2 has role=member, but workspace creation needs admin+)."
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"{{user2_internal_id}}\",\n  \"role\": \"editor\"\n}" },
+            "description": "Requires 'Add Workspace Member (user2 as viewer)' to have run first (user2 has role=viewer, but adding members needs owner)."
           },
           "event": [
             {
@@ -437,15 +403,15 @@
           ]
         },
         {
-          "name": "Member role CAN list (member+ required) -> 200",
+          "name": "Viewer role CAN list documents (viewer+ required) -> 200",
           "request": {
             "method": "GET",
             "header": [],
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token_2}}" }] },
             "url": {
-              "raw": "{{base_url}}/tenants/{{tenant_id}}/workspaces",
+              "raw": "{{base_url}}/workspaces/{{workspace_id}}/documents",
               "host": ["{{base_url}}"],
-              "path": ["tenants", "{{tenant_id}}", "workspaces"]
+              "path": ["workspaces", "{{workspace_id}}", "documents"]
             }
           },
           "event": [

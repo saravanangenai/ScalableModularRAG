@@ -19,18 +19,12 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _create_tenant_and_workspace(api_client, token: str) -> tuple[str, str]:
-    tenant_response = await api_client.post(
-        "/tenants",
-        json={"name": "Ingestion Tenant", "slug": f"ingest-{uuid.uuid4().hex[:8]}"},
-        headers=_auth(token),
-    )
-    tenant_id = tenant_response.json()["id"]
+async def _create_workspace(api_client, token: str) -> str:
     workspace_response = await api_client.post(
-        f"/tenants/{tenant_id}/workspaces", json={"name": "Default"}, headers=_auth(token)
+        "/workspaces", json={"name": "Default"}, headers=_auth(token)
     )
-    workspace_id = workspace_response.json()["id"]
-    return tenant_id, workspace_id
+    assert workspace_response.status_code == 201
+    return workspace_response.json()["id"]
 
 
 async def _poll_job_until_terminal(
@@ -54,7 +48,7 @@ async def _poll_job_until_terminal(
 
 
 async def test_upload_ingests_and_reaches_ready(api_client, user1_token):
-    tenant_id, workspace_id = await _create_tenant_and_workspace(api_client, user1_token)
+    workspace_id = await _create_workspace(api_client, user1_token)
 
     pdf_bytes = FIXTURE_PDF.read_bytes()
     upload_response = await api_client.post(
@@ -89,7 +83,7 @@ async def test_upload_ingests_and_reaches_ready(api_client, user1_token):
     )
     assert len(points) > 0
     payload = points[0].payload
-    assert payload["tenant_id"] == tenant_id
+    assert "tenant_id" not in payload
     assert payload["workspace_id"] == workspace_id
     assert payload["document_id"] == document_id
     assert payload["is_current_version"] is True

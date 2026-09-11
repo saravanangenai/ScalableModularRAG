@@ -1,5 +1,10 @@
 # Spec: Auth and Workspaces
 
+> ⚠️ **Superseded in part by [`012-single-tenant-simplification`](../012-single-tenant-simplification/spec.md).**
+> The tenant layer described below (`tenants`/`tenant_members`, tenant roles, the
+> `app.current_tenant_id` GUC + RLS, `/tenants/*` routes) was removed by `012`. IdP login,
+> `users`, `workspaces`/`workspace_members`, and workspace RBAC remain as specified.
+
 - **ID:** `011-auth-and-workspaces`
 - **Roadmap phase:** [08-roadmap.md](../architecture/08-roadmap.md) Phase 2 — Metadata DB +
   Object Storage + Auth + Multi-Doc (this spec covers the auth/workspace half; DB/storage was

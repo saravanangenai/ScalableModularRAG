@@ -53,7 +53,6 @@ def _point_id(
 
 def run_ingestion(
     job_id: uuid.UUID,
-    tenant_id: uuid.UUID,
     *,
     session: Session,
     storage: StorageClient,
@@ -64,15 +63,12 @@ def run_ingestion(
     chunk_overlap: int = 120,
 ) -> None:
     """Runs one ingestion job end-to-end: parsing -> chunking -> embedding -> indexing ->
-    ready, or failed with failure_stage/failure_reason recorded. `session` must already have
-    app.current_tenant_id set (session-scoped, not transaction-scoped — see
-    packages.auth.context.set_tenant_scope_sync's docstring for why) by the caller
-    (workers/celery_app.py) before this function is called; this function commits multiple
-    times as the job advances and never sets the GUC itself.
+    ready, or failed with failure_stage/failure_reason recorded. This function commits
+    multiple times as the job advances through stages.
     """
     job = session.get(IngestionJob, job_id)
     if job is None:
-        raise IngestionError(f"ingestion job {job_id} not found (or not visible for this tenant)")
+        raise IngestionError(f"ingestion job {job_id} not found")
 
     document_version = session.get(DocumentVersion, job.document_version_id)
     document = session.get(Document, job.document_id)
@@ -142,12 +138,11 @@ def run_ingestion(
 
             # Extracted images live on local disk (packages/parsing's output) — upload each
             # to object storage so Qdrant's image_path payload field points at a durable,
-            # tenant-scoped key instead of a worker-local temp path.
+            # workspace-scoped key instead of a worker-local temp path.
             uploaded_image_keys: dict[str, str] = {}
             for image_record in parsed["images"]:
                 local_path = image_record["image_path"]
                 key = image_key(
-                    tenant_id,
                     document.workspace_id,
                     document.id,
                     document_version.id,
@@ -168,7 +163,6 @@ def run_ingestion(
                         id=point_id,
                         vector=vector,
                         payload={
-                            "tenant_id": str(tenant_id),
                             "workspace_id": str(document.workspace_id),
                             "document_id": str(document.id),
                             "document_version_id": str(document_version.id),

@@ -2,6 +2,10 @@
 
 - **Status:** approved baseline
 
+> ⚠️ **Single-tenant as-built ([`specs/012`](../012-single-tenant-simplification/spec.md)).**
+> The mandatory filter is `workspace_id` + ACL only — no `tenant_id` term. Multi-tenancy is
+> the deferred target (roadmap Phase 10).
+
 ## 1. Current behavior (V1, to be replaced)
 
 `src/retriever.py::MultimodalQdrantRetriever` does dense-only search

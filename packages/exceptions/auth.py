@@ -7,11 +7,11 @@ class AuthenticationError(DocumentPortalException):
 
 
 class AuthorizationError(DocumentPortalException):
-    """Raised when the caller is a known member of the target tenant/workspace but their
+    """Raised when the caller is a known member of the target workspace but their
     role doesn't meet the route's minimum requirement. Maps to HTTP 403."""
 
 
 class MembershipNotFoundError(DocumentPortalException):
-    """Raised when the caller has no membership at all in the target tenant/workspace.
+    """Raised when the caller has no membership at all in the target workspace.
     Maps to HTTP 404 (not 403), per 06-security-model.md §5: a non-member must not be able
     to distinguish "doesn't exist" from "exists but you can't see it"."""

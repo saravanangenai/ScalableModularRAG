@@ -26,10 +26,9 @@ def is_api_key(bearer_value: str) -> bool:
 
 
 async def resolve_active_api_key(session: AsyncSession, plaintext_key: str) -> ApiKey | None:
-    """Looks up an API key by its hash and returns it only if not revoked. api_keys carries
-    tenant_id directly and isn't RLS-protected differently from other lookups here — this
-    query runs before the GUC is set, same bootstrap-ordering reasoning as
-    packages.auth.context's tenant/workspace role resolution."""
+    """Looks up an API key by its hash and returns it only if not revoked. The caller is
+    responsible for checking the resolved key's workspace_id against the request's target
+    workspace."""
     key_hash = hash_api_key(plaintext_key)
     api_key = await session.scalar(
         select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.revoked_at.is_(None))

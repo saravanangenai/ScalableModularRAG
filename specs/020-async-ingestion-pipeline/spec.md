@@ -1,5 +1,10 @@
 # Spec: Async Ingestion Pipeline
 
+> ⚠️ **Amended by [`012-single-tenant-simplification`](../012-single-tenant-simplification/spec.md).**
+> The pipeline no longer carries `tenant_id`: job rows, Qdrant payloads, and object-storage
+> keys are workspace-scoped, and the worker no longer sets an RLS GUC. Everything else below
+> is current.
+
 - **ID:** `020-async-ingestion-pipeline`
 - **Roadmap phase:** [08-roadmap.md](../architecture/08-roadmap.md) Phase 3 — Async Ingestion
 - **Status:** approved

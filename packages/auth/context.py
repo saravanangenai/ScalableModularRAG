@@ -1,11 +1,10 @@
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
-from packages.db.models import TenantMember, User, WorkspaceMember
+from packages.db.models import User, WorkspaceMember
 
 
 async def get_or_provision_user(
@@ -29,58 +28,13 @@ async def get_or_provision_user(
     return user
 
 
-async def resolve_tenant_role(
-    session: AsyncSession, user_id: uuid.UUID, tenant_id: uuid.UUID
-) -> str | None:
-    """tenant_members carries no tenant_id-of-its-own / isn't RLS-protected (see
-    packages.db.models.TENANT_SCOPED_TABLES), so this is safe to query before the RLS GUC
-    is set — it's what determines what to set the GUC to in the first place."""
-    return await session.scalar(
-        select(TenantMember.role).where(
-            TenantMember.tenant_id == tenant_id, TenantMember.user_id == user_id
-        )
-    )
-
-
 async def resolve_workspace_role(
     session: AsyncSession, user_id: uuid.UUID, workspace_id: uuid.UUID
-) -> tuple[str, uuid.UUID] | None:
-    """Returns (role, tenant_id) or None if the caller has no membership in this workspace.
-    tenant_id comes along for free here (denormalized onto workspace_members, see
-    011-auth-and-workspaces/plan.md) because the caller needs it to set the RLS GUC, and
-    workspaces itself can't be queried for it before the GUC is set."""
-    row = (
-        await session.execute(
-            select(WorkspaceMember.role, WorkspaceMember.tenant_id).where(
-                WorkspaceMember.workspace_id == workspace_id,
-                WorkspaceMember.user_id == user_id,
-            )
+) -> str | None:
+    """Returns the caller's role in this workspace, or None if they have no membership."""
+    return await session.scalar(
+        select(WorkspaceMember.role).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
         )
-    ).first()
-    return (row.role, row.tenant_id) if row is not None else None
-
-
-async def set_tenant_scope(session: AsyncSession, tenant_id: uuid.UUID, local: bool = True) -> None:
-    """Sets app.current_tenant_id, engaging the Row-Level Security policies from
-    010-metadata-db-and-object-storage. local=True (default) scopes it to the current
-    transaction only (resets on commit/rollback) — required for apps/api, whose sessions sit
-    in a pool and get reused across unrelated requests/tenants. Pass local=False only for a
-    session dedicated to one tenant for its whole lifetime (see set_tenant_scope_sync)."""
-    await session.execute(
-        text("SELECT set_config('app.current_tenant_id', :tenant_id, :local)"),
-        {"tenant_id": str(tenant_id), "local": local},
-    )
-
-
-def set_tenant_scope_sync(session: Session, tenant_id: uuid.UUID, local: bool = True) -> None:
-    """Sync counterpart of set_tenant_scope, for callers using packages.db's sync session
-    factory — added in 020-async-ingestion-pipeline for workers/celery_app.py, which runs
-    sync (Celery tasks are sync by default, per 010's "Session/engine strategy"). The worker
-    calls this with local=False: its session is dedicated to one job/tenant for its whole
-    lifetime (never pooled across tenants), and the ingestion pipeline commits multiple times
-    as ingestion_jobs.status advances through each stage — a transaction-local GUC would
-    reset on every one of those commits, re-triggering the bootstrap problem mid-job."""
-    session.execute(
-        text("SELECT set_config('app.current_tenant_id', :tenant_id, :local)"),
-        {"tenant_id": str(tenant_id), "local": local},
     )

@@ -1,15 +1,47 @@
 import uuid
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.deps.auth import get_current_user
 from apps.api.deps.db import get_db_session
 from apps.api.deps.rbac import WorkspaceAccess, require_workspace_role
 from apps.api.schemas.members import MemberAdd, MemberRoleUpdate
+from apps.api.schemas.workspaces import WorkspaceCreate, WorkspaceOut
 from packages.db.audit import write_audit_log
-from packages.db.models import WorkspaceMember
+from packages.db.models import User, Workspace, WorkspaceMember
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
+
+
+@router.post("", response_model=WorkspaceOut, status_code=201)
+async def create_workspace(
+    body: WorkspaceCreate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> Workspace:
+    workspace = Workspace(name=body.name, created_by=user.id)
+    session.add(workspace)
+    await session.flush()
+    # Creator is the first member; without this nobody could manage the workspace afterward.
+    session.add(
+        WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner")
+    )
+    return workspace
+
+
+@router.get("", response_model=list[WorkspaceOut])
+async def list_my_workspaces(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[Workspace]:
+    result = await session.execute(
+        select(Workspace)
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+        .where(WorkspaceMember.user_id == user.id)
+    )
+    return list(result.scalars().all())
 
 
 @router.post("/{workspace_id}/members", status_code=201)
@@ -22,18 +54,17 @@ async def add_workspace_member(
         WorkspaceMember(
             workspace_id=access.workspace_id,
             user_id=body.user_id,
-            tenant_id=access.tenant_id,
             role=body.role,
         )
     )
     write_audit_log(
         session,
-        tenant_id=access.tenant_id,
-        actor_user_id=access.user.id,
+        workspace_id=access.workspace_id,
+        actor_user_id=access.user.id if access.user else None,
         action="workspace_member.add",
         resource_type="workspace_member",
         resource_id=body.user_id,
-        metadata={"role": body.role, "workspace_id": str(access.workspace_id)},
+        metadata={"role": body.role},
     )
     return {"status": "added"}
 
@@ -51,12 +82,12 @@ async def update_workspace_member_role(
     member.role = body.role
     write_audit_log(
         session,
-        tenant_id=access.tenant_id,
-        actor_user_id=access.user.id,
+        workspace_id=access.workspace_id,
+        actor_user_id=access.user.id if access.user else None,
         action="workspace_member.role_change",
         resource_type="workspace_member",
         resource_id=user_id,
-        metadata={"role": body.role, "workspace_id": str(access.workspace_id)},
+        metadata={"role": body.role},
     )
     return {"status": "updated"}
 
@@ -73,10 +104,9 @@ async def remove_workspace_member(
     await session.delete(member)
     write_audit_log(
         session,
-        tenant_id=access.tenant_id,
-        actor_user_id=access.user.id,
+        workspace_id=access.workspace_id,
+        actor_user_id=access.user.id if access.user else None,
         action="workspace_member.remove",
         resource_type="workspace_member",
         resource_id=user_id,
-        metadata={"workspace_id": str(access.workspace_id)},
     )
