@@ -182,6 +182,63 @@ class ApiKey(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
 
 
+class DocumentTable(Base):
+    """One row per table extracted from a document version (specs/051-table-intelligence).
+    document_id is a direct FK (not the ephemeral IngestionJob's document_version_id alone)
+    so the RLS policy (migration 0003) is a one-hop join to documents, matching
+    document_versions/ingestion_jobs's existing shape rather than a two-hop join."""
+
+    __tablename__ = "document_tables"
+    __table_args__ = (
+        Index("ix_document_tables_document_id", "document_id"),
+        Index("ix_document_tables_document_version_id", "document_version_id"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    document_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_versions.id", ondelete="CASCADE")
+    )
+    table_index: Mapped[int]
+    page_number: Mapped[int]
+    object_storage_key: Mapped[str]  # raw CSV, mirrors document_versions/image storage keys
+    summary: Mapped[str | None] = mapped_column(nullable=True)  # LLM summary; primary embedded text
+    schema_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # [{"name","type"}, ...]
+    row_count: Mapped[int]
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+
+class TableCell(Base):
+    """Normalized table rows, keyed (document_id, table_id, row_index, column_name) per
+    specs/architecture/05-multimodal-strategy.md §2. document_id is denormalized from
+    document_tables for the same one-hop-RLS-join reason noted there — not queried by
+    anything yet (specs/051-table-intelligence's explicit non-goal); stored for a future
+    text-to-SQL-style tool."""
+
+    __tablename__ = "table_cells"
+    __table_args__ = (
+        UniqueConstraint(
+            "table_id", "row_index", "column_name", name="uq_table_cells_table_row_column"
+        ),
+        Index("ix_table_cells_document_id", "document_id"),
+        Index("ix_table_cells_table_id", "table_id"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_tables.id", ondelete="CASCADE")
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    row_index: Mapped[int]
+    column_name: Mapped[str]
+    value: Mapped[str | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = (

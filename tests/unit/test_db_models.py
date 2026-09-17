@@ -12,6 +12,8 @@ EXPECTED_TABLES = {
     "message_feedback",
     "api_keys",
     "audit_log",
+    "document_tables",
+    "table_cells",
 }
 
 
@@ -42,3 +44,22 @@ def test_document_versions_unique_per_document_and_version_number():
 def test_users_auth_provider_subject_is_unique():
     table = Base.metadata.tables["users"]
     assert table.columns["auth_provider_subject"].unique
+
+
+def test_table_cells_unique_per_table_row_and_column():
+    table = Base.metadata.tables["table_cells"]
+    unique_constraints = {
+        tuple(col.name for col in constraint.columns)
+        for constraint in table.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("table_id", "row_index", "column_name") in unique_constraints
+
+
+def test_document_tables_and_table_cells_are_reachable_from_documents():
+    """Both are RLS-protected via a one-hop join to documents (migration 0003), not a direct
+    workspace_id column — same shape as document_versions/ingestion_jobs."""
+    assert "document_id" in Base.metadata.tables["document_tables"].columns
+    assert "document_id" in Base.metadata.tables["table_cells"].columns
+    assert "workspace_id" not in Base.metadata.tables["document_tables"].columns
+    assert "workspace_id" not in Base.metadata.tables["table_cells"].columns

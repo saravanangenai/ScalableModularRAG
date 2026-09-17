@@ -32,7 +32,7 @@ first — everything else builds on it.
 
 ## Per-increment specs
 
-The first three per `08-roadmap.md`:
+Per `08-roadmap.md`'s phased plan:
 
 | ID | Title | Status |
 |---|---|---|
@@ -40,6 +40,14 @@ The first three per `08-roadmap.md`:
 | `011-auth-and-workspaces` | IdP integration, tenant/workspace membership, API auth middleware (tenancy parts superseded by `012`) | done |
 | `012-single-tenant-simplification` | Dropped the tenant layer; kept IdP login + workspace RBAC. Amends `010`/`011`/`020` | done |
 | `020-async-ingestion-pipeline` | Celery/Redis job queue, parser workers, status endpoints | done |
+| `030-workspace-rbac-filtering` | Workspace-scoped Postgres RLS, dense-only `packages/retrieval` + search route with a mandatory server-constructed `workspace_id` filter, RBAC guard audit, retrieval authorization test suite | done |
+| `040-hybrid-retrieval-reranking` | Sparse (BM25) search leg, Reciprocal Rank Fusion with the existing dense leg, self-hosted cross-encoder reranking — same mandatory `workspace_id` filter, same search route/contract | done |
+| `050-vision-captioning` | Vision LLM captioning for extracted images at ingestion time, replacing OCR-only text as the primary embedded signal while keeping OCR for exact-string matches | done |
+| `051-table-intelligence` | Durable raw table storage, LLM-generated table summaries as primary embedded text, column schema metadata, normalized `document_tables`/`table_cells` rows (RLS-protected), row-group chunking for large tables | done |
+| `060-retrieval-evaluation` | Golden retrieval dataset (from `sample.pdf`'s own built-in eval section), eval CLI over `packages/retrieval`'s public functions, recall@k/precision@k/latency, comparable before/after reports (hybrid vs. dense-only) | done |
+| `061-observability-tracing-metrics` | OpenTelemetry tracing (Jaeger) across auth/retrieval/ingestion, Prometheus + Grafana metrics, Sentry error tracking — all native/free, no generation-pipeline dependency | in-progress (Sentry live-verification deferred) |
+| `070-api-hardening` | CORS policy, per-caller rate limiting, security response headers, and a read endpoint over the existing `audit_log` table — the baseline `apps/api` needs before real browser traffic | done |
+| `071-search-frontend` | `apps/UI` React SPA (Vite): Keycloak login, workspace/member management, document upload + live ingestion status, content-type-aware search results — chat deferred pending a generation pipeline | in-progress (real-browser verification pending — no browser in this environment) |
 
 Add a row here every time a new `specs/<NNN-slug>/` folder is created (`.claude/skills/spec/SKILL.md`
 Stage 1). Status values: `draft` -> `approved` -> `in-progress` -> `done`.

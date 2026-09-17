@@ -19,7 +19,7 @@ mm-rag/
 │   └── skills/spec/SKILL.md         # spec-driven workflow (this document set's process)
 ├── specs/                            # this directory
 ├── apps/
-│   ├── api/                          # FastAPI backend — the only thing apps/web and
+│   ├── api/                          # FastAPI backend — the only thing apps/UI and
 │   │   ├── main.py                   # apps/streamlit-admin are allowed to talk to
 │   │   ├── routers/
 │   │   │   ├── documents.py          # upload, list, get, delete, versions
@@ -31,9 +31,19 @@ mm-rag/
 │   │   ├── deps/                      # auth guards, tenant/workspace resolution
 │   │   ├── schemas/                   # pydantic request/response models (the API contract)
 │   │   └── settings.py
-│   ├── UI/                           # Vue.js — public product UI (assignment 3.1)
-│   │   └── (standard Vue.js app structure; calls apps/api only, never Qdrant/Postgres
-│   │      directly, never holds provider API keys)
+│   ├── UI/                           # React SPA (Vite) — public product UI (assignment 3.1)
+│   │   ├── src/
+│   │   │   ├── auth/                  # AuthProvider (OIDC+PKCE via mm-rag-ui client),
+│   │   │   │                          # RequireAuth route guard
+│   │   │   ├── api/                   # typed fetch wrapper + one module per apps/api
+│   │   │   │                          # resource (workspaces/documents/jobs/search/members)
+│   │   │   ├── pages/                 # WorkspaceListPage, WorkspacePage (Documents/
+│   │   │   │                          # Members/Search tabs), LoginCallback
+│   │   │   └── components/            # ResultCard (content-type-aware), JobStatusBadge
+│   │   └── (Vite + React + React Router + TanStack Query + Mantine; calls apps/api only,
+│   │      never Qdrant/Postgres directly, never holds provider API keys; static `vite
+│   │      build` output only — no Node server needed at runtime — specs/
+│   │      071-search-frontend)
 │   └── streamlit-admin/               # what ui/app.py becomes: internal/demo tool
 │       └── app.py                     # calls apps/api over HTTP, no direct src/* imports
 ├── packages/                          # shared business logic — importable by apps/api,
@@ -85,7 +95,7 @@ from `apps/api`, `workers/celery_app.py`, `eval/run.py`, and (if ever needed) a 
 same rule `01-system-architecture.md` §5 states architecturally, expressed here as an import
 boundary that can be lint-enforced (e.g. an import-linter/`tach` config as a follow-up spec).
 
-`apps/web` and `apps/streamlit-admin` never import `packages/*` directly and never hold
+`apps/UI` and `apps/streamlit-admin` never import `packages/*` directly and never hold
 provider API keys (OpenAI, Qdrant) — they are pure API clients. This is what makes "separate
 project for UI" actually true rather than nominal: today `ui/app.py` imports `src/parsing.py`
 et al. directly, which is exactly the coupling this structure removes.
@@ -102,7 +112,7 @@ et al. directly, which is exactly the coupling this structure removes.
 | `exception/custom_exception.py` | `packages/exceptions/` |
 | `logger/custom_logger.py` | `packages/observability/` (extended with OTel) |
 | `prompt_library/prompt.py` | unchanged location |
-| *(none)* | `apps/api`, `apps/web`, `workers/`, `eval/`, `packages/db`, `packages/storage`, `packages/auth` — all new |
+| *(none)* | `apps/api`, `apps/UI`, `workers/`, `eval/`, `packages/db`, `packages/storage`, `packages/auth` — all new |
 
 This mapping is the concrete migration checklist that Phase 2-3 specs
 (`08-roadmap.md`) will turn into `tasks.md` entries — nothing above is executed until the

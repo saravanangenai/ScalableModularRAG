@@ -25,31 +25,32 @@ ported into this repo yet — see `specs/architecture/09-repo-and-module-structu
   `apps/UI`, `apps/streamlit-admin`, `packages/*`) is the target this repo is scaffolded
   against — see below for what's a stub vs. what's implemented.
 
-Note: `01-system-architecture.md` currently describes the web UI as Next.js under
-`apps/web`, while `09-repo-and-module-structure.md` names it Vue.js under `apps/UI`. This
-repo is scaffolded using the folder name from `09` (`apps/UI`); reconcile the framework/name
-mismatch between the two docs before that app is actually built.
+The web UI (`apps/UI`) is a **React SPA built with Vite** (React Router for routing, static
+build output only — no Node server needed at runtime, calls `apps/api` for everything). This
+was an open mismatch between `01-system-architecture.md` (said Next.js) and
+`09-repo-and-module-structure.md` (said Vue.js); resolved when `070`'s spec work started —
+both docs now say React/Vite consistently.
 
 ## Current state
 
-Nothing is implemented yet. The directories below exist only as empty scaffolding
-(`.gitkeep` placeholders) mirroring the target layout, waiting on their first approved spec:
+Specs `010` through `061` are implemented (see `specs/README.md` for the live per-spec
+status table — check it, not this paragraph, for what's actually done vs. in-progress).
+Roughly: Postgres schema + migrations, S3/MinIO storage, Keycloak-backed auth, workspace
+RBAC + Postgres RLS, async Celery ingestion (parsing/OCR/tables/images/vision captioning/
+table intelligence), hybrid dense+sparse+RRF+rerank retrieval, a retrieval-quality eval CLI
+(`eval/`), and OpenTelemetry tracing + Prometheus/Grafana metrics (Sentry wired but not
+live-verified — no account provisioned yet) are all built and live-verified against a real
+local stack (native Postgres/Keycloak/MinIO/Qdrant Cloud/Redis/Jaeger/Prometheus/Grafana,
+`--pool=solo` Celery worker on Windows).
 
-```
-apps/api/{routers,deps,schemas}/
-apps/UI/
-apps/streamlit-admin/
-packages/{parsing,ingestion,retrieval,generation,db,storage,auth,observability,exceptions}/
-workers/
-eval/{datasets,reports}/
-infra/
-prompt_library/
-tests/{unit,integration}/
-```
+Still empty scaffolding (`.gitkeep` only, nothing built yet): `apps/UI/`,
+`apps/streamlit-admin/`, `packages/generation/`, `prompt_library/` — these map to later
+roadmap phases (generation/chat doesn't exist yet, which is why eval is retrieval-only and
+Sentry/observability skip anything answer-quality-related).
 
-Do not assume any of these packages/apps has real code, an API contract, or a schema until
-a spec under `specs/<NNN-slug>/` says so and it's been implemented. Check the actual
-directory contents, not this list, before relying on something existing.
+Do not assume any package/app has real code, an API contract, or a schema beyond what
+`specs/README.md` marks done — check actual directory contents and that table, not this
+paragraph, before relying on something existing.
 
 ## How work happens here — spec-driven, always
 

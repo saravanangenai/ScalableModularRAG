@@ -5,6 +5,18 @@
 > ⚠️ **Single-tenant as-built ([`specs/012`](../012-single-tenant-simplification/spec.md)).**
 > The mandatory filter is `workspace_id` + ACL only — no `tenant_id` term. Multi-tenancy is
 > the deferred target (roadmap Phase 10).
+>
+> **The full pipeline below is implemented** — dense search
+> ([`specs/030-workspace-rbac-filtering`](../030-workspace-rbac-filtering/spec.md)) plus
+> sparse search, RRF fusion, and reranking
+> ([`specs/040-hybrid-retrieval-reranking`](../040-hybrid-retrieval-reranking/spec.md)).
+> Concrete choices §2's "BM25/SPLADE" and "BAAI/bge-reranker-large, self-hosted, or Cohere
+> Rerank API" left open: **BM25** via `fastembed.SparseTextEmbedding` (`Qdrant/bm25`,
+> zero-training statistical method, no learned model), and a **self-hosted** FastEmbed
+> `TextCrossEncoder` (`Xenova/ms-marco-MiniLM-L-6-v2` — chosen smaller than
+> `bge-reranker-large` for practical CPU-only local inference), not Cohere.
+> `packages/retrieval/filters.py::build_workspace_filter` is the mandatory filter §6
+> describes; both the dense and sparse legs apply it independently, unchanged.
 
 ## 1. Current behavior (V1, to be replaced)
 
@@ -16,24 +28,27 @@ returns raw cosine-similarity top-K straight from Qdrant. This is adequate for a
 weak on exact-term queries (contract clause numbers, table headers, proper nouns) where
 lexical match matters more than semantic similarity.
 
-## 2. Target pipeline
+## 2. Target pipeline (implemented — `packages/retrieval`)
 
 ```
 query
   |
-  +--> dense search (Qdrant, existing dense vector, top N=~30)
+  +--> dense search (Qdrant, unnamed default dense vector, top N=30 — dense.py)
   |
-  +--> sparse search (Qdrant named sparse vector, BM25/SPLADE via FastEmbed, top N=~30)
-  |
-  v
-Reciprocal Rank Fusion (RRF) over the two ranked lists -> fused top ~30
+  +--> sparse search (Qdrant named "sparse" vector, BM25 via fastembed.SparseTextEmbedding
+  |     "Qdrant/bm25", top N=30 — sparse.py)
   |
   v
-Cross-encoder reranker (BAAI/bge-reranker-large, self-hosted, or Cohere Rerank API) scores
-(query, chunk) pairs -> reorder
+Reciprocal Rank Fusion (RRF, rrf_k=60) over the two ranked lists -> fused, deduped by point
+  id (fusion.py)
   |
   v
-Top-K (default 6-8) passed to Generation Service as context
+Cross-encoder reranker (fastembed.rerank.cross_encoder.TextCrossEncoder,
+"Xenova/ms-marco-MiniLM-L-6-v2", self-hosted) scores (query, chunk) pairs -> reorder,
+truncate to k (rerank.py)
+  |
+  v
+Top-K (default 8, caller-adjustable 1-50) returned by POST /workspaces/{workspace_id}/search
 ```
 
 Every stage still applies the **mandatory tenant/workspace/ACL filter** from
@@ -45,9 +60,9 @@ never around it.
 | Stage | Runs in | Solves |
 |---|---|---|
 | Dense search | Qdrant (existing collection, existing dense vector) | Semantic/paraphrase matches — "what does the incident policy say" matches text that never uses those exact words. This is what V1 already does. |
-| Sparse search | Qdrant (new named sparse vector on the same collection, using Qdrant's native sparse vector support with FastEmbed's BM25/SPLADE) | Exact lexical/keyword matches — clause numbers, proper nouns, table headers, acronyms — where dense embeddings under-weight rare exact tokens. This is the biggest single quality gap in V1. |
-| RRF fusion | `packages/retrieval` (application code, not Qdrant) | Combines two rankings without needing to calibrate dense/sparse score scales against each other — rank-based fusion is scale-invariant, which raw score-averaging is not. |
-| Cross-encoder rerank | `packages/retrieval`, calling a reranker model/API | Both dense and sparse are bi-encoder-style approximations (query and document embedded independently); a cross-encoder that reads (query, chunk) jointly is much more accurate at judging true relevance, but too slow to run over the whole collection — so it only reranks the ~30 fused candidates, not all chunks. |
+| Sparse search | Qdrant (named `"sparse"` vector on the same collection/point as the dense vector — `packages/ingestion/qdrant_setup.py`, `packages/retrieval/sparse.py`) | Exact lexical/keyword matches — clause numbers, proper nouns, table headers, acronyms — where dense embeddings under-weight rare exact tokens. Verified against a real query (`tests/integration/test_hybrid_search.py`): a rare alphanumeric ID surfaces correctly through the full pipeline. |
+| RRF fusion | `packages/retrieval/fusion.py` (application code, not Qdrant) | Combines two rankings without needing to calibrate dense/sparse score scales against each other — rank-based fusion is scale-invariant, which raw score-averaging is not. |
+| Cross-encoder rerank | `packages/retrieval/rerank.py`, self-hosted FastEmbed `TextCrossEncoder` | Both dense and sparse are bi-encoder-style approximations (query and document embedded independently); a cross-encoder that reads (query, chunk) jointly is much more accurate at judging true relevance, but too slow to run over the whole collection — so it only reranks the ~30 fused candidates, not all chunks. |
 | Metadata filtering | Qdrant, applied to both dense and sparse legs before fusion | Tenant/workspace/ACL isolation (mandatory) plus optional user-facing filters (filename, content_type, page range) — same filters `build_filter` already supports, extended with tenant/workspace/ACL terms. |
 | Top-K selection | `packages/retrieval` | Bounds what's sent to the LLM (cost, latency, context-window budget) — same role `max_context_chars`/`k` play in `src/generation.py` today. |
 
@@ -58,10 +73,16 @@ never around it.
   diversity-aware candidate set at negligible cost before the comparatively expensive
   reranker runs.
 - Fusion alone (no reranker) is what most "hybrid search" demos stop at, but RRF is still a
-  cheap heuristic; a cross-encoder rerank is what actually moves recall@k/precision@k in
-  practice, so it's included as baseline, not a stretch goal — the evaluation framework in
-  `07-evaluation-observability.md` should be able to measure this pipeline with and without
-  the reranker to confirm it's earning its latency cost.
+  cheap heuristic; a cross-encoder rerank is included as baseline on the theory that it
+  moves recall@k/precision@k in practice.
+- **Measured** (`060-retrieval-evaluation`, `eval/reports/20260916T135648Z-fbeccea.json` vs.
+  `eval/reports/20260916T135709Z-fbeccea.json`, 7-case golden dataset, k=8): both
+  dense-only and full hybrid+rerank hit recall@8 = 1.0. Dense-only actually scored a
+  *higher* mean reciprocal rank (0.929 vs. 0.616) and ran ~6x faster (p50 360ms vs. 2172ms).
+  This is a small (7-case) dataset and not proof the reranker is unnecessary in general, but
+  it's evidence against assuming the reranker is free value — see
+  `specs/060-retrieval-evaluation/tasks.md` for the full numbers. Worth growing the golden
+  dataset and re-measuring before deciding whether reranking should stay on by default.
 
 ## 5. Content-type-aware retrieval
 

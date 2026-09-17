@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import Settings as ApiSettings
 from apps.api.deps.db import get_db_session
+from apps.api.deps.rate_limit import enforce_rate_limit
 from apps.api.deps.rbac import WorkspaceAccess, require_workspace_role
 from apps.api.schemas.documents import (
     DocumentOut,
@@ -22,6 +24,8 @@ router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["documents"])
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
+_api_settings = ApiSettings()
+
 
 @router.post("/documents")
 async def upload_document(
@@ -32,6 +36,7 @@ async def upload_document(
 ) -> UploadAccepted | UploadUnchanged:
     if access.user is None:
         raise HTTPException(status_code=401, detail="uploading requires user authentication")
+    enforce_rate_limit("upload", access, _api_settings.rate_limit_upload_per_minute)
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=415, detail="only PDF uploads are supported")
 
@@ -107,7 +112,7 @@ async def upload_document(
 
     await session.commit()
 
-    run_ingestion_job.delay(str(job.id))
+    run_ingestion_job.delay(str(job.id), str(access.workspace_id))
 
     response.status_code = 202
     return UploadAccepted(

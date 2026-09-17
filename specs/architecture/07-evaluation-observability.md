@@ -14,6 +14,13 @@ better or worse.
 
 ## 2. Evaluation framework (assignment 3.10)
 
+**Status:** the golden dataset, `eval/` CLI, and recall@k/precision@k/MRR/latency metrics
+below are implemented and retrieval-only, as of `060-retrieval-evaluation`. Groundedness,
+answer correctness, citation correctness, and token/model cost (all below) remain deferred —
+they require a generation pipeline, which doesn't exist yet in this repo (roadmap: after
+Phase 8). Comments below describing implementation are accurate for the retrieval slice
+only; anything mentioning `packages/generation` is still aspirational.
+
 ### Golden dataset
 
 A version-controlled dataset (`eval/datasets/<name>.jsonl`, one row per case):
@@ -59,37 +66,64 @@ claim.
 
 ### How it runs
 
-A CLI/script (`eval/run.py`) callable in CI on a schedule and on-demand locally, using
-`packages/retrieval` and `packages/generation` directly (same code path production uses —
-not a reimplementation) against a pinned Qdrant collection snapshot or a dedicated eval
-workspace, so eval runs are reproducible and don't pollute production usage metrics.
+A CLI/script (`eval/run.py`) callable in CI on a schedule and on-demand locally. As
+implemented (`060-retrieval-evaluation`), it composes `packages/retrieval`'s public
+functions directly (same code path production uses, not a reimplementation) against a
+dedicated eval workspace, so eval runs are reproducible and don't pollute production usage
+metrics. `packages/generation` doesn't exist yet, so generation-stage metrics (groundedness,
+answer correctness, citation correctness, cost) aren't produced by this CLI — that's future
+scope once a generation pipeline lands.
 
 ## 3. Observability
 
+**Status:** tracing and metrics below are implemented and live-verified end-to-end
+(`061-observability-tracing-metrics`). Error tracking (Sentry) is implemented in code
+(`packages/observability/sentry.py::configure_sentry`, wired into both `apps/api` and
+`workers`) but not yet live-verified — it requires a real Sentry account/DSN, which wasn't
+provisioned in this increment; `configure_sentry(dsn=None, ...)` no-ops safely, so local dev
+and CI run fine without one. `apps/UI` doesn't exist yet, so it isn't wired anywhere.
+
 ### Tracing
 
-OpenTelemetry instrumentation across `apps/api` and `packages/*`, with one trace per request
-spanning: auth check -> retrieval (dense span, sparse span, fusion span, rerank span) ->
-generation (prompt build span, LLM call span). Exported to an LLM-aware tracing backend
-(Langfuse or Arize Phoenix) so prompts, retrieved context, and model outputs are inspectable
-per-trace — not just latency numbers — which is what makes debugging "why did this answer go
-wrong" tractable in production versus grepping log files.
+OpenTelemetry instrumentation across `apps/api`, `workers`, and `packages/retrieval`/
+`packages/ingestion`, exported via OTLP-HTTP to a locally-run, native-binary **Jaeger v2**
+instance (not Langfuse/Arize Phoenix as originally sketched here — both are
+LLM-observability platforms whose main value, prompt/output inspection, has nothing to
+instrument yet since `packages/generation` doesn't exist; revisit when a generation spec
+lands, since the spans themselves are already OTel-standard and swapping the OTLP endpoint
+is a small change, not a re-instrumentation). Live-verified trace shapes:
+- A search request produces one connected trace: root `POST /workspaces/{workspace_id}/
+  search` (`opentelemetry-instrumentation-fastapi`'s auto span) with
+  `auth.resolve_workspace_access`, `retrieval.dense_search`, `retrieval.sparse_search`,
+  `retrieval.fusion`, `retrieval.rerank` as direct children.
+- An ingestion job produces one connected trace: root `run/workers.celery_app.
+  run_ingestion_job` (Celery's OTel auto-instrumentation) with `ingestion.parsing`,
+  `ingestion.chunking`, `ingestion.embedding`, `ingestion.indexing` as children, and
+  `ingestion.vision_captioning`/`ingestion.table_summarization` nested inside `parsing`.
 
 ### Metrics
 
-Prometheus counters/histograms exported from `apps/api` and workers: request rate, error
-rate, latency histograms per route, queue depth and job duration per `ingestion_jobs` stage,
-Qdrant query latency, LLM call latency and token counts. Grafana dashboards per the
-assignment's "admin analytics" and "usage quotas" product capabilities, backed by the same
-`usage_quotas`/`audit_log` tables in `02-data-model.md`.
+Prometheus counters/histograms exported from `apps/api` (`/metrics`, via
+`prometheus-fastapi-instrumentator`: request rate, error rate, latency histograms per route)
+and from `workers` (`:9100`, via `prometheus_client`: `ingestion_stage_duration_seconds`,
+`ingestion_jobs_total`) — plus `retrieval_stage_duration_seconds` (dense/sparse/fusion/
+rerank latency), recorded wherever each leg runs (`apps/api` for search requests). Grafana
+dashboard (`infra/grafana/dashboards/platform-overview.json`, version-controlled) live-
+verified with real data from an actual search request and ingestion job. LLM call
+token/cost counts remain future scope, tied to `packages/generation`.
+
+`070-api-hardening`'s rate-limit `429` responses are a new, expected error class visible in
+`http_requests_total{status="429"}` — no new metric needed, the instrumentation above
+already captures any status code a route returns.
 
 ### Error tracking
 
-Sentry (or equivalent) for unhandled exceptions across `apps/api`, workers, and `apps/web`,
-replacing/augmenting the current pattern of catching everything into
-`DocumentPortalException` and logging it (`exception/custom_exception.py`) — that pattern is
-kept for structured internal errors, but unhandled exceptions additionally get captured with
-full context for alerting.
+Sentry via its hosted free tier (not self-hosted — self-hosting is a multi-service stack out
+of proportion to this project's no-Docker, native-binary pattern) for unhandled exceptions
+across `apps/api` and `workers`, replacing/augmenting the current pattern of catching
+everything into `DocumentPortalException` and logging it — that pattern is kept for
+structured internal errors, but unhandled exceptions additionally get captured with full
+context for alerting once a `SENTRY_DSN` is configured. `apps/UI` doesn't exist yet.
 
 ### Feedback loop
 

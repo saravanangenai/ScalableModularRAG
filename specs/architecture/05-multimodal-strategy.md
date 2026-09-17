@@ -2,6 +2,22 @@
 
 - **Status:** approved baseline
 
+> ⚠️ **Vision captioning is implemented** —
+> [`specs/050-vision-captioning`](../050-vision-captioning/spec.md). It runs in
+> `packages/ingestion/pipeline.py::run_ingestion` (not `packages/parsing`, to keep that
+> package's zero-network-dependency, easily-unit-tested nature — a plan-level refinement
+> this doc didn't originally specify), using `langchain_openai.ChatOpenAI` with
+> `gpt-4.1-mini` (confirmed available, not just assumed, before locking it in).
+>
+> **Table intelligence is implemented** —
+> [`specs/051-table-intelligence`](../051-table-intelligence/spec.md), also in
+> `packages/ingestion/pipeline.py::run_ingestion`. The normalized-rows table is named
+> `document_tables`/`table_cells` (this doc's §2 used the placeholder name `table_cells`
+> alone); column-type inference is a local pandas heuristic, not a second LLM call. Both
+> tables are workspace-scoped Row-Level Security-protected using the exact one-hop
+> `EXISTS`-join-through-`documents` policy shape `030` established, applied from creation
+> (migration `0003`) rather than retrofitted.
+
 ## 1. Images
 
 ### Current limitation (V1)
@@ -15,21 +31,32 @@ image itself is still shown to the multimodal LLM at generation time
 (`src/generation.py::_image_to_data_url` + `_build_messages`), but only *after* it's already
 been retrieved — and retrieval is the step OCR-dependence weakens.
 
-### Baseline improvement: vision captioning at ingestion time
+### Baseline improvement: vision captioning at ingestion time (implemented)
 
 ```
 Image -> Vision Summary/Caption (multimodal LLM call during ingestion) -> Embedding -> Qdrant
 ```
 
 During the `parsing` stage of ingestion (see `03-ingestion-workflow.md`), for each extracted
-image, call a multimodal LLM (the same model family already used in
-`src/generation.py`, e.g. `gpt-4.1-mini`) with the image and a fixed captioning prompt asking
-for: what the image depicts, any visible text/labels/numbers, and its likely purpose in a
-business/contract/technical document. The resulting caption becomes the **primary embedded
-text** for that chunk (replacing raw OCR as the dense/sparse embedding source), while OCR
-text is retained alongside it in the payload for exact-string matches (e.g. someone searching
-a specific number visible in a chart). This is additive to `image_records` — same shape,
-plus a `vision_caption` field.
+image, `packages/ingestion/pipeline.py::run_ingestion` calls
+`packages/ingestion/vision.py::caption_image` (`gpt-4.1-mini` via `langchain_openai.ChatOpenAI`)
+with the image and a fixed captioning prompt asking for: what the image depicts, any visible
+text/labels/numbers, and its likely purpose in a business/contract/technical document. The
+resulting caption is combined with OCR text into one embedded blob (`"VISION CAPTION:
+{caption}\n\nOCR TEXT: {ocr_text}"`, mirroring the existing `SELECTABLE TEXT:`/`OCR TEXT:`
+combined-text pattern page-level chunks already use) — this becomes the **primary embedded
+text** for that chunk, while OCR text stays part of the same blob so an exact string visible
+in a chart (a number, a label) remains matchable via the sparse/BM25 leg
+(`specs/040-hybrid-retrieval-reranking`). The caption is also stored standalone as a
+`vision_caption` Qdrant payload field. A captioning failure (API error, timeout,
+content-policy refusal) degrades that one image to OCR-only text, exactly like
+`run_ocr_on_image`'s existing failure handling — it never fails the ingestion job.
+
+Verified end to end (`tests/integration/test_vision_captioning.py`): a synthetic fixture page
+containing a portrait photo with no OCR-able text gets a real caption
+("...no discernible numbers or other text"), and a semantic query describing what the photo
+depicts (never quoting any visible text, since there isn't any) correctly surfaces it through
+the hybrid search pipeline — something OCR-only retrieval could not have done.
 
 Cost/latency tradeoff: one extra LLM call per image at ingestion time (not per query), which
 is why this belongs in the async ingestion pipeline (`03-ingestion-workflow.md`) rather than
@@ -62,26 +89,40 @@ split, per `_split`'s content-type check, so a large table becomes one oversized
 mostly-unsearchable chunk) and unusable for exact factual lookups ("what was the amount in
 row 14" is not something a markdown-embedding similarity search reliably answers).
 
-### Baseline improvement: table intelligence, not just markdown
+### Baseline improvement: table intelligence, not just markdown (implemented)
 
-For each extracted table, store and index four things (extends
-`ComplexPDFParser.extract_tables`'s existing `table_records` shape):
+For each extracted table, `packages/ingestion/pipeline.py::run_ingestion` stores and indexes
+four things (extends `ComplexPDFParser.extract_tables`'s existing `table_records` shape):
 
-1. **Raw table content** — already captured (`raw_table`, `csv`); persisted to object
-   storage/Postgres instead of only the local `table_records.json` file.
-2. **Searchable table summary** — an LLM-generated natural-language description of what the
-   table contains (e.g. "Quarterly incident counts by region, 2023-2024, columns: Region,
-   Q1..Q4, Total"). This, not the raw markdown, becomes the primary embedded text — same
-   rationale as image captions: better semantic surface for retrieval.
-3. **Headers/schema information** — column names and inferred types (string/number/date/
-   currency), stored as structured metadata so filters and the generation prompt can cite
-   "column X" reliably instead of re-parsing markdown at answer time.
-4. **Normalized structured representation** — the cleaned rows loaded into a queryable form
-   (a `table_cells` Postgres table, or DuckDB over the stored CSV) keyed by
-   `(document_id, table_index, row_index, column_name)`, enabling a future text-to-SQL /
-   text-to-pandas answer path for exact factual questions ("what was the total for Q3") that
-   pure semantic retrieval structurally cannot answer reliably, since it has to match a
-   *number*, not a *meaning*.
+1. **Raw table content** — already captured (`raw_table`, `csv`); the CSV is uploaded to
+   object storage (`packages/storage/keys.py::table_key`, mirroring `image_key`'s exact
+   shape) instead of only existing in the local, debug-only `table_records.json`.
+2. **Searchable table summary** — `packages/ingestion/table_intelligence.py::summarize_table`,
+   one LLM call (`gpt-4.1-mini`, the same shared client `050`'s vision captioning uses) per
+   table. This, not the raw markdown, becomes the primary embedded text — same rationale as
+   image captions: better semantic surface for retrieval. A summarization failure degrades
+   that table's chunks to header+rows only (no `SUMMARY:` section), never the whole raw
+   table — each row-group chunk's own content is already self-sufficient.
+3. **Headers/schema information** — `infer_column_types` (pandas heuristics: numeric,
+   date, currency-affix detection, string fallback — no second LLM call), stored as
+   `document_tables.schema_json`.
+4. **Normalized structured representation** — `table_cells`, keyed
+   `(document_id, table_id, row_index, column_name)`, RLS-protected identically to every
+   other document-derived table (migration `0003`, `030`'s established one-hop-join
+   pattern). Nothing queries it yet — the text-to-SQL/text-to-pandas path below remains a
+   deferred follow-up, per its own non-goal.
+
+Row-group chunking: a table above `table_chunk_row_threshold` (default 20 rows) splits into
+`table_chunk_group_size`-row (default 15) chunks, header implicitly preserved in each group
+since every group is still a full DataFrame with the same columns
+(`packages/ingestion/table_intelligence.py::chunk_table_by_rows`).
+
+Verified end to end (`tests/integration/test_table_intelligence.py`): a real table's summary,
+schema, and normalized cells are all correctly persisted and RLS-protected, and the
+resulting chunk is searchable with the summary as its primary content. (None of the fixture
+PDF's naturally-occurring tables exceed the row-group threshold — the multi-group chunking
+arithmetic itself is exactly verified with a synthetic 32-row table in
+`tests/unit/test_ingestion_table_intelligence.py` instead.)
 
 Chunking: tables above a size threshold get split by row-groups (not raw text
 `RecursiveCharacterTextSplitter`, which would cut a row in half) with the header row repeated

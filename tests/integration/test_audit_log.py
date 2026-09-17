@@ -4,6 +4,7 @@ import uuid
 
 from sqlalchemy import text
 
+from tests.integration.test_rls import _set_scope
 from tests.integration.test_upload_and_ingest import _auth, _create_workspace
 
 
@@ -39,6 +40,10 @@ async def test_membership_and_api_key_actions_write_audit_rows(
         f"/workspaces/{workspace_id}/api-keys/{key_id}", headers=_auth(user1_token)
     )
 
+    # audit_log is RLS-protected (migration 0002); db_session is a raw ORM session that
+    # never went through require_workspace_role, so it must set the scope itself before
+    # reading rows written under that workspace's GUC.
+    _set_scope(db_session, uuid.UUID(workspace_id))
     rows = db_session.execute(
         text(
             "SELECT action, resource_type, resource_id FROM audit_log "

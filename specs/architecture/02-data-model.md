@@ -5,15 +5,26 @@
 
 > ⚠️ **Single-tenant as-built — see [`specs/012-single-tenant-simplification`](../012-single-tenant-simplification/spec.md).**
 > `012` removed the tenant layer for assignment scope: no `tenants` / `tenant_members` /
-> `usage_quotas` tables, no `tenant_id` column on any table, and **no Row-Level Security**.
-> `api_keys` and `audit_log` are workspace-scoped. See §0 below for the live schema. The
+> `usage_quotas` tables, no `tenant_id` column on any table. `api_keys` and `audit_log` are
+> workspace-scoped. See §0 below for the live schema, including the workspace-scoped
+> Row-Level Security `specs/030-workspace-rbac-filtering` added as defense-in-depth. The
 > multi-tenant design in §1–§4 is retained as the deferred target (roadmap Phase 10);
 > parts that are not currently implemented are marked ⚠️ DEFERRED.
 
 ## 0. As-built schema (single-tenant)
 
 Live entities after `012`. Isolation is per-workspace, enforced at the application layer
-(every query filters by `workspace_id` behind a `workspace_members` role check).
+(every query filters by `workspace_id` behind a `workspace_members` role check) plus
+workspace-scoped Postgres Row-Level Security as defense-in-depth (migration `0002`,
+`specs/030-workspace-rbac-filtering`; migration `0003`, `specs/051-table-intelligence`) on
+`documents`, `document_versions`, `ingestion_jobs`, `api_keys`, `audit_log`,
+`document_tables`, `table_cells` — keyed on an `app.current_workspace_id` session GUC, with
+`FORCE ROW LEVEL SECURITY` since the app's single DB user owns every table. Everything
+except `documents`/`api_keys`/`audit_log` has no direct `workspace_id` column (below), so
+their policy joins to `documents` rather than a denormalized column. `workspaces`/
+`workspace_members` are deliberately not RLS-protected (the caller's role must be
+resolvable from `workspace_members` before the GUC can exist); `conversations`/`messages`/
+`message_feedback` aren't yet either (no route reads or writes them).
 
 ```
 users                 id, email (unique), display_name,
@@ -38,12 +49,20 @@ api_keys              id, workspace_id (fk), key_hash (unique), scopes,
                       created_by, revoked_at, created_at
 audit_log             id, workspace_id (fk, nullable), actor_user_id (nullable),
                       action, resource_type, resource_id, metadata_json, created_at
+document_tables       id, document_id (fk), document_version_id (fk), table_index,
+                      page_number, object_storage_key, summary, schema_json, row_count,
+                      created_at
+table_cells           id, table_id (fk document_tables), document_id (fk), row_index,
+                      column_name, value, created_at
 ```
 
 Indexes: `workspace_members(user_id)`, `documents(workspace_id)`,
 `document_versions(document_id, version_number)`, `ingestion_jobs(status)`,
 `conversations(workspace_id)`, `api_keys(workspace_id)`,
-`audit_log(workspace_id, created_at)`. Object-storage keys are
+`audit_log(workspace_id, created_at)`, `document_tables(document_id)`,
+`document_tables(document_version_id)`, `table_cells(document_id)`,
+`table_cells(table_id)`; `table_cells` also has a unique constraint on
+`(table_id, row_index, column_name)`. Object-storage keys are
 `{workspace_id}/{document_id}/…`. Qdrant point payload carries `workspace_id` (no
 `tenant_id`); required payload indexes drop `tenant_id`.
 
@@ -247,6 +266,7 @@ point (chunk) payload:
   "image_path": "s3://.../page_012_image_1.png",
   "filename": "Client_Contracts.pdf",
   "visibility": "workspace",
+  "text": "the chunk's source text, as embedded",
   "created_at": "2026-08-17T..."
 }
 ```
@@ -255,6 +275,17 @@ This is a direct extension of the existing metadata already produced by
 `src/ingestion.py::prepare_documents` (`document_id`, `filename`, `content_type`,
 `page_number`, `chunk_index`, `table_index`, `image_index`, `image_path`) — we are adding
 `tenant_id`, `workspace_id`, `document_version_id`, `is_current_version`, and `visibility`.
+`text` was added later, by `specs/030-workspace-rbac-filtering` — the chunk was always
+embedded from it, but nothing stored it until that phase's search endpoint needed something
+to return besides a score and metadata. The as-built (single-tenant) payload matches this
+minus `tenant_id` (§0).
+
+Since `specs/040-hybrid-retrieval-reranking`, every point also carries a **named `"sparse"`
+vector** (BM25, via `fastembed.SparseTextEmbedding`) alongside the unnamed default dense
+vector shown above — same point, same payload, two vectors. This required recreating the
+Qdrant collection (`packages/ingestion/qdrant_setup.py::ensure_collection`): Qdrant does not
+support adding a new named vector to an existing collection in place, only creating it or
+updating an already-configured one's index settings.
 
 Required payload indexes (extending the existing `_ensure_collection` index set in
 `src/ingestion.py`): `tenant_id`, `workspace_id`, `document_id`, `document_version_id`,

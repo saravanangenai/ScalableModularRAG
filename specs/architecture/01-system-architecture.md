@@ -25,8 +25,8 @@ Nothing here is implemented yet unless a linked spec under `specs/<NNN-slug>/` s
                                    USERS
                                      |
                         +------------------------+
-                        |   Web UI (Next.js)     |   Streamlit (internal/admin)
-                        |   apps/web             |   apps/streamlit-admin
+                        |   Web UI (React SPA)   |   Streamlit (internal/admin)
+                        |   apps/UI              |   apps/streamlit-admin
                         +------------------------+
                                      |  HTTPS/JSON (OpenAPI)
                                      v
@@ -106,7 +106,7 @@ repo's code and naming.
 
 | Component | Responsibility | Owns | Current repo mapping | Scales independently because |
 |---|---|---|---|---|
-| **Web UI** (`apps/web`, Next.js) | Public-facing product UI: workspaces, chat, source/page preview, sharing, feedback | Nothing durable — calls the API for everything | New (assignment 3.1); replaces Streamlit as the public surface | Stateless SPA/SSR; scales with CDN + edge, independent of backend load |
+| **Web UI** (`apps/UI`, React SPA via Vite) | Public-facing product UI: workspaces, chat, source/page preview, sharing, feedback | Nothing durable — calls the API for everything | New (assignment 3.1); replaces Streamlit as the public surface | Stateless, fully client-rendered SPA (no Node server at runtime, static files only); scales with a CDN, independent of backend load |
 | **Streamlit admin** (`apps/streamlit-admin`) | Internal/demo tool for parsing inspection, manual re-ingestion, debugging | Nothing durable — calls the API, does not import `src/*` directly anymore | `ui/app.py`, rewired to call `apps/api` instead of the pipeline in-process | Low-traffic, single instance is fine |
 | **API Gateway / Auth** (`apps/api`, FastAPI) | AuthN (JWT verification), authorization guards, request validation, routing to services, rate limiting, quota enforcement | No business logic beyond auth/routing | New; wraps `src/*` logic | Stateless — horizontal scale behind a load balancer |
 | **Ingestion Service** (`packages/ingestion`) | Orchestrates parse -> chunk -> embed -> index for one document version; emits status transitions | Job state machine | `src/ingestion.py`, `src/parsing.py` | Scale worker count independently of API traffic; CPU/OCR-bound |

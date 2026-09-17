@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 KEYCLOAK_BASE_URL = "http://localhost:8080"
 REALM_NAME = "mm-rag"
 CLIENT_ID = "mm-rag-api"
+SPA_CLIENT_ID = "mm-rag-ui"
+SPA_DEV_ORIGIN = "http://localhost:5173"
 TEST_USERS = [
     ("testuser", "testuser@example.com", "testuser-changeme"),
     ("testuser2", "testuser2@example.com", "testuser2-changeme"),
@@ -44,15 +46,35 @@ def get_admin_token(client: httpx.Client, settings: BootstrapSettings) -> str:
     return response.json()["access_token"]
 
 
+# Local-dev-only token lifetimes, deliberately longer than Keycloak's defaults
+# (accessTokenLifespan defaults to 300s) so a manual testing/demo session in
+# apps/UI (specs/071-search-frontend) doesn't run into "session expired" every 5
+# minutes. Not a production security posture — revisit before any real deployment.
+DEV_ACCESS_TOKEN_LIFESPAN = 300  # 5 minutes
+DEV_SSO_SESSION_IDLE_TIMEOUT = 7200  # 2 hours
+
+
 def ensure_realm(client: httpx.Client, headers: dict) -> None:
     response = client.get(f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}", headers=headers)
+    realm_settings = {
+        "realm": REALM_NAME,
+        "enabled": True,
+        "accessTokenLifespan": DEV_ACCESS_TOKEN_LIFESPAN,
+        "ssoSessionIdleTimeout": DEV_SSO_SESSION_IDLE_TIMEOUT,
+    }
     if response.status_code == 200:
-        print(f"realm {REALM_NAME!r} already exists")
+        update_response = client.put(
+            f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}",
+            headers=headers,
+            json={**response.json(), **realm_settings},
+        )
+        update_response.raise_for_status()
+        print(f"realm {REALM_NAME!r} already exists (token lifetimes confirmed)")
         return
     response = client.post(
         f"{KEYCLOAK_BASE_URL}/admin/realms",
         headers=headers,
-        json={"realm": REALM_NAME, "enabled": True},
+        json=realm_settings,
     )
     response.raise_for_status()
     print(f"created realm {REALM_NAME!r}")
@@ -108,6 +130,80 @@ def ensure_client(client: httpx.Client, headers: dict) -> str:
     )
     response.raise_for_status()
     return response.json()["value"]
+
+
+def ensure_spa_client(client: httpx.Client, headers: dict) -> None:
+    """specs/071-search-frontend: a public client for the browser SPA — Authorization Code
+    + PKCE, no client secret (public clients don't get one; PKCE replaces the secret's role
+    in preventing authorization-code interception), no Direct Access Grants (browser-only,
+    unlike CLIENT_ID's confidential test client)."""
+    response = client.get(
+        f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}/clients",
+        headers=headers,
+        params={"clientId": SPA_CLIENT_ID},
+    )
+    response.raise_for_status()
+    existing = response.json()
+    payload = {
+        "clientId": SPA_CLIENT_ID,
+        "enabled": True,
+        "protocol": "openid-connect",
+        "publicClient": True,
+        "directAccessGrantsEnabled": False,
+        "standardFlowEnabled": True,
+        "implicitFlowEnabled": False,
+        "serviceAccountsEnabled": False,
+        "redirectUris": [f"{SPA_DEV_ORIGIN}/*"],
+        "webOrigins": [SPA_DEV_ORIGIN],
+        "attributes": {"pkce.code.challenge.method": "S256"},
+    }
+    # Without this, apps/api's JWT verification (packages/auth/jwt.py, which requires
+    # `aud` to contain CLIENT_ID) rejects every token this client issues — confirmed live
+    # (every apps/api call 401'd immediately after a fresh login, even though the token
+    # itself was valid/unexpired) when this client was first created without it.
+    audience_mapper = {
+        "name": "audience-mapper",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": False,
+        "config": {
+            "included.client.audience": CLIENT_ID,
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+        },
+    }
+    if existing:
+        client_uuid = existing[0]["id"]
+        response = client.put(
+            f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}/clients/{client_uuid}",
+            headers=headers,
+            json={**existing[0], **payload},
+        )
+        response.raise_for_status()
+
+        mappers_response = client.get(
+            f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}/clients/{client_uuid}/protocol-mappers/models",
+            headers=headers,
+        )
+        mappers_response.raise_for_status()
+        if not any(m["name"] == "audience-mapper" for m in mappers_response.json()):
+            create_mapper_response = client.post(
+                f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}/clients/{client_uuid}/protocol-mappers/models",
+                headers=headers,
+                json=audience_mapper,
+            )
+            create_mapper_response.raise_for_status()
+            print(f"added missing audience-mapper to {SPA_CLIENT_ID!r}")
+        print(f"client {SPA_CLIENT_ID!r} already exists (settings confirmed)")
+    else:
+        payload["protocolMappers"] = [audience_mapper]
+        response = client.post(
+            f"{KEYCLOAK_BASE_URL}/admin/realms/{REALM_NAME}/clients",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        print(f"created client {SPA_CLIENT_ID!r}")
 
 
 def ensure_test_user(client: httpx.Client, headers: dict, username: str, email: str, password: str) -> None:
@@ -173,6 +269,7 @@ def main() -> None:
 
         ensure_realm(client, headers)
         client_secret = ensure_client(client, headers)
+        ensure_spa_client(client, headers)
         for username, email, password in TEST_USERS:
             ensure_test_user(client, headers, username, email, password)
 

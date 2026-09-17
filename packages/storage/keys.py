@@ -25,3 +25,17 @@ def image_key(
         f"{workspace_id}/{document_id}/{document_version_id}"
         f"/images/{image_index}.png"
     )
+
+
+def table_key(
+    workspace_id: uuid.UUID | str,
+    document_id: uuid.UUID | str,
+    document_version_id: uuid.UUID | str,
+    table_index: int,
+) -> str:
+    """Key for a table's raw CSV extracted from a specific document_version, written by
+    ingestion (specs/051-table-intelligence) — mirrors image_key's exact shape."""
+    return (
+        f"{workspace_id}/{document_id}/{document_version_id}"
+        f"/tables/{table_index}.csv"
+    )

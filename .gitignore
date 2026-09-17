@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 !*/.env.example
+# apps/UI/.env.development holds only public OIDC client config (API base URL, Keycloak
+# realm/client ID) — no secrets; committed so a fresh clone has working local defaults.
+!apps/UI/.env.development
 
 # Python
 __pycache__/
@@ -21,6 +24,7 @@ venv/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Docker
 infra/*_data/

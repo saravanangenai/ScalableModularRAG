@@ -85,3 +85,27 @@ async def test_upload_rejects_pdf_content_type_with_bad_magic_bytes(api_client, 
         headers=_auth(user1_token),
     )
     assert response.status_code == 415
+
+
+async def test_member_role_update_and_removal_404_for_non_member_user_id(
+    api_client, user1_token
+):
+    """Found during specs/030-workspace-rbac-filtering's existing-route audit: both routes
+    did session.get(WorkspaceMember, ...) and then used the result unconditionally
+    (member.role = ...; session.delete(member)) — a user_id with no membership row crashed
+    with an unhandled 500 (AttributeError / UnmappedInstanceError) instead of a clean 404,
+    unlike every other route in this file."""
+    workspace_id = await _create_workspace(api_client, user1_token)
+    random_user_id = uuid.uuid4()
+
+    patch_response = await api_client.patch(
+        f"/workspaces/{workspace_id}/members/{random_user_id}",
+        json={"role": "viewer"},
+        headers=_auth(user1_token),
+    )
+    assert patch_response.status_code == 404
+
+    delete_response = await api_client.delete(
+        f"/workspaces/{workspace_id}/members/{random_user_id}", headers=_auth(user1_token)
+    )
+    assert delete_response.status_code == 404

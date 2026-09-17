@@ -41,9 +41,12 @@ queued -> parsing -> chunking -> embedding -> indexing -> ready
 - **queued**: job row created, sitting in Celery broker, not yet picked up.
 - **parsing**: `ComplexPDFParser` equivalent running — text/OCR extraction, table extraction,
   image extraction with OCR (matching V1's behavior as ported by
-  `020-async-ingestion-pipeline`). Vision captioning of images (`05-multimodal-strategy.md`)
-  is **not** part of this stage yet — per `08-roadmap.md`, that's Phase 6
-  (`050-059`, after hybrid retrieval exists to benefit from it), not this phase.
+  `020-async-ingestion-pipeline`), plus vision captioning of images
+  (`05-multimodal-strategy.md` §1, `050-vision-captioning`) and table intelligence —
+  summarization, schema inference, normalized-row storage, row-group chunking
+  (`05-multimodal-strategy.md` §2, `051-table-intelligence`) — both implemented as
+  post-processing passes in `packages/ingestion/pipeline.py::run_ingestion` after
+  `ComplexPDFParser.parse()` returns, still within this stage, not a new one.
 - **chunking**: `RecursiveCharacterTextSplitter` (as in `src/ingestion.py::_split`) applied to
   text content; tables/images kept as single chunks as today.
 - **embedding**: dense (OpenAI) + sparse (BM25/SPLADE via FastEmbed) vectors computed per

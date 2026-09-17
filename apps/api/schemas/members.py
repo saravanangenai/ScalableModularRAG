@@ -10,3 +10,10 @@ class MemberAdd(BaseModel):
 
 class MemberRoleUpdate(BaseModel):
     role: str
+
+
+class MemberOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str
+    role: str

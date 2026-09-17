@@ -1,6 +1,6 @@
 import uuid
 
-from packages.storage.keys import document_key, image_key
+from packages.storage.keys import document_key, image_key, table_key
 
 
 def test_document_key_shape():
@@ -32,4 +32,16 @@ def test_image_key_shape():
 
     assert key == (
         f"{workspace_id}/{document_id}/{document_version_id}/images/3.png"
+    )
+
+
+def test_table_key_shape():
+    workspace_id = uuid.uuid4()
+    document_id = uuid.uuid4()
+    document_version_id = uuid.uuid4()
+
+    key = table_key(workspace_id, document_id, document_version_id, 2)
+
+    assert key == (
+        f"{workspace_id}/{document_id}/{document_version_id}/tables/2.csv"
     )
